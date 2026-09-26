@@ -2,7 +2,7 @@
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 $saved = @{}
-foreach ($name in @('TELEGRAM_BOT_TOKEN','TELEGRAM_WEBHOOK_SECRET')) { $saved[$name] = [Environment]::GetEnvironmentVariable($name) }
+foreach ($name in @('TELEGRAM_BOT_TOKEN','TELEGRAM_WEBHOOK_SECRET','TELEGRAM_ADMIN_ID')) { $saved[$name] = [Environment]::GetEnvironmentVariable($name) }
 $operationCalls = [System.Collections.Generic.List[object]]::new()
 function Assert-Check([bool]$Condition, [string]$Message) { if (-not $Condition) { throw $Message } }
 function Invoke-RestMethod {
@@ -28,6 +28,11 @@ try {
     Assert-Check ($body.max_connections -eq 1) 'Expected one delivery connection.'
     Assert-Check (($body.allowed_updates -join ',') -eq 'message,callback_query') 'Wrong allowed updates.'
     Assert-Check (-not (($output -join '') -match 'fictional-token|fictional-webhook-secret|\?token=')) 'Helper output leaked private values.'
+    $env:TELEGRAM_ADMIN_ID='123'
+    $null = & (Join-Path $PSScriptRoot 'send-test-admin-notification.ps1')
+    Assert-Check ($operationCalls[3].Operation -eq 'sendMessage') 'Notification API missing.'
+    Assert-Check ($operationCalls[3].Body.text -ceq 'Production test admin notification.') 'Unexpected notification text.'
+    Assert-Check ($operationCalls[3].Body.chat_id -eq 123) 'Wrong notification destination.'
     $failed=$false
     try { & (Join-Path $PSScriptRoot 'configure-telegram-webhook.ps1') -PublicUrl http://test.invalid | Out-Null } catch { $failed=$true }
     Assert-Check $failed 'HTTP origin must be rejected.'

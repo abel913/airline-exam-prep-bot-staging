@@ -86,7 +86,7 @@ made by those tests. PostgreSQL script verification uses only disposable data.
 - Fixed absolute HTTP admin redirects found during packaged reverse-proxy smoke;
   prod now emits relative redirects and tests login/dashboard/logout over real HTTP.
 
-## External state and remaining acceptance
+## Initial external handoff (superseded by live follow-up below)
 
 Using existing ignored local credentials, the read-only Supabase check confirmed
 encrypted Session Pooler connectivity and an empty public schema. No Supabase
@@ -111,3 +111,46 @@ disposable drill passed. No live content/payment/registration record was created
 This phase must not be marked complete or ready for Phase 10 until the requested
 live acceptance gates are resolved. See PRODUCTION_RUNBOOK.md for exact actions,
 rollback constraints, unsupported Boot-line limitation and future credential work.
+
+## Live follow-up: 2026-09-26
+
+After deployment, the full suite and package were run again: each passes all 414
+automated tests with zero failures, errors or skips. The extended PowerShell
+checks pass for the fixed-text notification helper. No application Java/config
+change was needed after the successful Render deployment.
+
+The user deployed https://airline-exam-prep-bot.onrender.com and confirmed the
+Supabase Data API is off. HTTPS health returns UP. Live database inspection confirms
+V1–V13 applied successfully. The deployed healthy application supplies Render
+build/runtime evidence; local Docker remains unavailable and Render image layers
+were not independently inspected. No development data was copied into Supabase.
+
+Live checks pass for private admin login/dashboard/logout, session invalidation,
+Secure/HttpOnly/SameSite cookies, CSP, authenticated mutation rejection without
+CSRF, anonymous admin/receipt/audit/settings protection, and sensitive actuator
+endpoint rejection. Missing and invalid webhook secrets return 403. Health lists
+liveness/readiness group names without sensitive details.
+
+The user confirmed the webhook helper succeeded and then reported START WORKED.
+The helper invokes getMe, setWebhook and getWebhookInfo; those operations are
+user-confirmed rather than independently repeated because the real bot token is
+unavailable to this local session. A fixed-text, environment-based admin notification
+helper is now provided. No token or admin destination was requested in chat.
+
+A real Supabase public-schema backup was taken over TLS and its archive verified.
+It restored into a new isolated loopback database with all 13 successful Flyway
+records and the admin account. Packaged application startup with Telegram disabled
+and the matching existing HMAC key validated migrations and reached health UP.
+The disposable service was stopped. The private archive remains ignored.
+
+Latest read-only snapshot: three unfinished registrations, no completed registration,
+no published content, and both payment flags false. No fake Telegram user or SQL
+registration was created. A one-question original content smoke was prepared but
+blocked by automatic approval review; explicit approval was requested before any
+live publication. Practice/mock checks remain limited by available content.
+
+Remaining human checks: safe Render restart and persistence verification, actual
+Free/Frankfurt configuration confirmation, dashboard log review, admin notification
+delivery, and optional own-contact registration/practice. Render cold-start time
+is not measured. No live payment/receipt check was performed; automated evidence
+remains authoritative for those workflows. Phase 9 is not yet declared complete.

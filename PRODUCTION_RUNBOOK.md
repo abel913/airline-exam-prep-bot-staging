@@ -185,7 +185,15 @@ Practice may report no content and mock may report insufficient content. Do not
 create 50 throwaway production questions or reduce entitlements merely for smoke
 tests. Payment flags start disabled; keep them disabled unless deliberately testing
 with synthetic references and harmless images. Never transfer real money for a
-smoke test. Test notifications only to the configured admin identity.
+smoke test. Test notifications only to the configured admin identity. With the
+existing private TELEGRAM_BOT_TOKEN and TELEGRAM_ADMIN_ID in the process environment:
+
+```powershell
+.\scripts\send-test-admin-notification.ps1
+```
+
+Confirm that the fixed message arrives in the admin chat. API acceptance alone is
+not a human delivery confirmation. The helper prints neither token nor recipient ID.
 
 After a safe Render redeploy, verify admin, registration and workflow records
 remain. All durable state is PostgreSQL; receipts are Telegram file IDs. Imports

@@ -2,7 +2,7 @@ Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
 function Invoke-TelegramOperation {
-    param([Parameter(Mandatory)][ValidateSet('getMe','setWebhook','getWebhookInfo','deleteWebhook')][string]$Method,
+    param([Parameter(Mandatory)][ValidateSet('getMe','setWebhook','getWebhookInfo','deleteWebhook','sendMessage')][string]$Method,
           [hashtable]$Body = @{})
     if ([string]::IsNullOrWhiteSpace($env:TELEGRAM_BOT_TOKEN)) { throw 'TELEGRAM_BOT_TOKEN is required in the process environment.' }
     try {
