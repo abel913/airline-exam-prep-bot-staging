@@ -149,8 +149,15 @@ registration was created. A one-question original content smoke was prepared but
 blocked by automatic approval review; explicit approval was requested before any
 live publication. Practice/mock checks remain limited by available content.
 
-Remaining human checks: safe Render restart and persistence verification, actual
-Free/Frankfurt configuration confirmation, dashboard log review, admin notification
-delivery, and optional own-contact registration/practice. Render cold-start time
+The user confirmed a successful Render restart followed by a working /start,
+Free instance, Frankfurt/Europe region, and webhook-mode logs without recurring
+errors. After that restart, independent live checks again passed admin login with
+the existing credentials, dashboard access, logout/session invalidation, CSRF,
+cookie/header protections, anonymous route protection and webhook secret rejection.
+This verifies the existing admin account remains usable across the restart.
+
+Remaining human checks: admin notification delivery and optional own-contact
+registration/practice, plus the pending sample-publication approval decision.
+Render cold-start time
 is not measured. No live payment/receipt check was performed; automated evidence
 remains authoritative for those workflows. Phase 9 is not yet declared complete.
