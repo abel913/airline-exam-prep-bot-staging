@@ -143,7 +143,7 @@ records and the admin account. Packaged application startup with Telegram disabl
 and the matching existing HMAC key validated migrations and reached health UP.
 The disposable service was stopped. The private archive remains ignored.
 
-Latest read-only snapshot: three unfinished registrations, no completed registration,
+Pre-sample read-only snapshot: three unfinished registrations, no completed registration,
 no published content, and both payment flags false. No fake Telegram user or SQL
 registration was created. A one-question original content smoke was prepared but
 blocked by automatic approval review; explicit approval was requested before any
@@ -156,8 +156,16 @@ the existing credentials, dashboard access, logout/session invalidation, CSRF,
 cookie/header protections, anonymous route protection and webhook secret rejection.
 This verifies the existing admin account remains usable across the restart.
 
-Remaining human checks: admin notification delivery and optional own-contact
-registration/practice, plus the pending sample-publication approval decision.
+The user confirmed receipt of the admin notification and explicitly approved the
+sample create/review/publish/practice flow. Following that approval, authenticated,
+CSRF-protected admin forms created the Beta Sample exam type, Sample Arithmetic
+category and one original arithmetic question (3 + 4, correct answer B / 7).
+The question passed through REVIEWED to PUBLISHED; a read-only database check
+confirmed its final status. No direct SQL content writes were used.
+
+Remaining human check: own-contact registration and the Telegram practice, answer
+and Progress display for the published sample. Instructions were provided; actual
+delivery and first-answer/progress persistence have not yet been confirmed.
 Render cold-start time
 is not measured. No live payment/receipt check was performed; automated evidence
 remains authoritative for those workflows. Phase 9 is not yet declared complete.
