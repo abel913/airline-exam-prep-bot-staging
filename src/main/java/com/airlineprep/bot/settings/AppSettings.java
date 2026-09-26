@@ -6,6 +6,9 @@ import com.airlineprep.bot.common.TimedEntity;
 @Entity
 @Table(name = "app_settings")
 public class AppSettings extends TimedEntity {
+    private boolean maintenanceEnabled;
+    public boolean getMaintenanceEnabled() { return maintenanceEnabled; }
+    public void setMaintenanceEnabled(boolean value) { maintenanceEnabled=value; }
     private Integer mockDurationMinutes;
     public Integer getMockDurationMinutes() { return mockDurationMinutes; }
     public void setMockDurationMinutes(Integer value) { mockDurationMinutes=value; }

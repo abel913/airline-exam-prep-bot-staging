@@ -6,6 +6,14 @@ public class StudentFlow {
  private final PracticeService practice;private final MockAttemptService mocks;
  private final StudentProgressService progress;private final StudentPresenter presenter;
  private final com.airlineprep.bot.settings.SettingsService settings;
+ private StudentInsights insights;
+ public StudentFlow withInsights(StudentInsights value) { insights=value;return this; }
+ public boolean maintenance(long sender) throws InterruptedException {
+  if(insights==null) return false;
+  String lang=insights.maintenanceLanguage(sender);
+  if(lang==null) return false;
+  presenter.error(sender,lang,"maintenance.message");return true;
+ }
  public StudentFlow(PracticeService p,MockAttemptService m,StudentProgressService g,StudentPresenter ui) { this(p,m,g,ui,null); }
  public StudentFlow(PracticeService p,MockAttemptService m,StudentProgressService g,StudentPresenter ui,com.airlineprep.bot.settings.SettingsService settings) { practice=p;mocks=m;progress=g;presenter=ui;this.settings=settings; }
  public void menu(long sender) throws InterruptedException { presenter.menu(sender,mocks.introduction(sender)); }
@@ -13,6 +21,22 @@ public class StudentFlow {
   String lang="en";
   try {
    var intro=mocks.introduction(sender);lang=intro.student().language();
+   if(insights!=null && data!=null && data.matches("s:(ph|mh|weak):[0-9]{1,6}|s:recommend|p:h:[0-9]{1,18}")) {
+    if(data.equals("s:recommend")) {
+     Long category=insights.recommendation(sender);
+     if(category==null) { presenter.error(sender,lang,"insights.fallback");presenter.categories(sender,intro.student(),practice.categories(sender)); }
+     else presenter.practice(sender,practice.next(sender,category,null,false));
+    } else if(data.startsWith("p:h:")) {
+     var view=practice.delivery(sender,Long.parseLong(data.substring(4)));
+     if(!view.answered()) throw new ExamException("student.invalid");
+     presenter.practice(sender,view);
+    } else {
+     String[] parts=data.split(":");int page=Integer.parseInt(parts[2]);
+     if(parts[1].equals("weak")) presenter.insights(sender,lang,insights.insights(sender,page));
+     else presenter.history(sender,lang,parts[1].equals("mh"),insights.history(sender,parts[1].equals("mh"),page));
+    }
+    return;
+   }
    if(data==null||data.length()>64||!data.matches("s:(home|help|progress)|p:menu|m:intro|p:(g|c|n|r):[0-9]+|p:a:[0-9]+:[0-9]+|m:s:[a-z0-9-]+|m:(o|r):[0-9]+:-?[0-9]+|m:a:[0-9]+:[0-9]+:[0-9]+:[0-9]+|m:f:[0-9]+")) throw new ExamException("student.invalid");
    if(data.equals("s:home")) presenter.menu(sender,intro);
    else if(data.equals("s:help")) presenter.help(sender,lang,settings==null?"":settings.current().getSupportInfo());

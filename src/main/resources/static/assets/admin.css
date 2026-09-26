@@ -29,3 +29,6 @@ main button{background:var(--accent);color:white;border:0;border-radius:7px;padd
 @media(max-width:1000px){.metrics{grid-template-columns:repeat(2,1fr)}.shell{grid-template-columns:190px minmax(0,1fr)}main{padding:28px}}
 @media(max-width:650px){.topbar{padding:16px}.brand small{display:none}.shell{display:block}.navigation{flex-direction:row;overflow:auto;padding:10px;border-right:0;border-bottom:1px solid var(--line)}.navigation a{white-space:nowrap;padding:8px;font-size:12px}main{padding:22px 16px}h1{font-size:26px}.form-grid{grid-template-columns:1fr;gap:0}.offer{grid-template-columns:1fr}.panel{padding:20px}.metric{padding:16px}.table-panel{padding:0}}
 :where(.panel){overflow-x:auto}input[type=checkbox]{width:auto;min-width:20px;min-height:20px}button,.button{min-height:44px}td,th{overflow-wrap:anywhere}textarea{min-height:110px;resize:vertical}.actions{flex-wrap:wrap}dt{font-weight:650;margin-top:12px}dd{margin-left:0}
+.table-wrap { overflow-x: auto; max-width: 100%; }
+.analytics-filters { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 1rem; align-items: end; }
+.table-wrap td, .table-wrap th { padding: .65rem; text-align: left; min-width: 6rem; overflow-wrap: anywhere; }

@@ -4,6 +4,8 @@
 <body><header th:replace="~{admin/fragments :: header}"></header>
 <div class="shell"><nav th:replace="~{admin/fragments :: nav}"></nav><main>
 <p class="eyebrow">PLATFORM OVERVIEW</p><h1>A clear view of your platform.</h1>
+<p class="notice error" role="status" th:if="${maintenance}">MAINTENANCE MODE ACTIVE</p>
+<p><a th:href="@{/admin/analytics}">Analytics, reports and maintenance controls</a></p>
 <p class="muted">Manage registration, access defaults, and exam organization.</p>
 <div class="metrics">
     <section class="metric" th:each="entry : ${paymentCounts}"><span th:text="${entry.key}"></span><strong th:text="${entry.value}">0</strong></section>

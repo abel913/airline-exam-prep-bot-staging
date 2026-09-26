@@ -51,6 +51,7 @@ public class TelegramUpdateHandler {
                 || !"private".equals(message.path("chat").path("type").asText())
                 || sender.path("is_bot").asBoolean(false)) return;
         try {
+            if(students!=null && students.maintenance(senderId)) return;
             if (callback.isObject()) {
                 String data = callback.path("data").asText("");
                 if (data.equals("lang:en") || data.equals("lang:am"))

@@ -16,6 +16,7 @@
 <h2>Version history</h2>
 <section class="panel" th:each="v : ${history}">
 <h3 th:text="${'Version '+v.versionNumber}"></h3>
+<p>Tags: <span th:text="${v.content.tags.isEmpty() ? 'None' : v.content.tags}"></span></p>
 <p th:text="${v.content.questionText}" class="question-text"></p>
 <ol><li th:each="o : ${v.options}"><span th:text="${o.text}"></span><strong th:if="${o.correct}"> — Correct</strong></li></ol>
 <p th:text="${v.content.explanation}" class="question-text"></p>

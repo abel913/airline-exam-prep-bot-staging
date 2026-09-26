@@ -1,0 +1,11 @@
+<!doctype html><html lang="en" xmlns:th="http://www.thymeleaf.org"><head th:replace="~{admin/fragments :: head('Analytics')}"></head>
+<body><header th:replace="~{admin/fragments :: header}"></header><div class="shell"><nav th:replace="~{admin/fragments :: nav}"></nav><main>
+<h1>Analytics and operations</h1><p>UTC calendar windows include today. Active students have practice answers or mock preparation, opening, answers or completion in the window. First-answer accuracy does not count repeats.</p>
+<form method="get"><label>Window<select name="window"><option th:each="w : ${ {'today','7','30','all'} }" th:value="${w}" th:text="${w == 'today' ? 'Today (UTC)' : (w == 'all' ? 'All time' : w + ' days (UTC)')}" th:selected="${filter.window == w}"></option></select></label><button>Apply window</button></form>
+<div class="metrics"><section class="metric" th:each="m : ${metrics}"><span th:text="${m.key}"></span><strong th:text="${m.value}"></strong></section></div>
+<h2>Reports</h2><ul><li th:each="r : ${reports}"><a th:href="@{/admin/analytics/{r}(r=${r},window=${filter.window})}" th:text="${r}"></a></li></ul>
+<section class="panel"><h2>System status</h2><p th:if="${operations.maintenanceEnabled}" class="notice error" role="status">MAINTENANCE MODE ACTIVE</p>
+<dl><dt>Telegram transport</dt><dd th:text="${transport}"></dd><dt>Payments enabled</dt><dd th:text="${operations.paymentEnabled}"></dd><dt>Manual payments enabled</dt><dd th:text="${operations.manualPaymentEnabled}"></dd><dt>Maintenance enabled</dt><dd th:text="${operations.maintenanceEnabled}"></dd></dl>
+<p>Maintenance responds to Telegram requests without executing business actions. Saved attempts remain available; timers continue. Admin and health remain accessible.</p>
+<form method="post" th:action="@{/admin/analytics/maintenance}"><input type="hidden" name="enabled" th:value="${!operations.maintenanceEnabled}"><button th:text="${operations.maintenanceEnabled ? 'Disable maintenance' : 'Enable maintenance'}"></button></form></section>
+</main></div></body></html>

@@ -31,8 +31,10 @@ public class QuestionController {
  String list(@RequestParam(defaultValue="") String text,@RequestParam(required=false) Long exam,
   @RequestParam(required=false) Long category,@RequestParam(required=false) QuestionStatus status,
   @RequestParam(required=false) String pool,@RequestParam(required=false) UseStatus rights,
-  @RequestParam(defaultValue="0") int page,@RequestParam(defaultValue="updatedAt") String sort,Model m) {
-  choices(m);m.addAttribute("rows",questions.search(text,exam,category,status,pool,rights,page,sort));
+  @RequestParam(defaultValue="0") int page,@RequestParam(defaultValue="updatedAt") String sort,
+  @RequestParam(required=false) Difficulty difficulty,@RequestParam(defaultValue="") String tag,Model m) {
+  choices(m);m.addAttribute("rows",questions.search(text,exam,category,status,pool,rights,page,sort,difficulty,tag));
+  m.addAttribute("difficulty",difficulty);m.addAttribute("tag",tag);
   m.addAttribute("text",text);m.addAttribute("exam",exam);m.addAttribute("category",category);m.addAttribute("status",status);m.addAttribute("pool",pool);m.addAttribute("useStatus",rights);m.addAttribute("sort",sort);
   return "admin/question-list";
  }

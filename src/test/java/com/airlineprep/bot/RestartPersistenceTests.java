@@ -30,14 +30,21 @@ class RestartPersistenceTests {
    registration.start(700001);registration.language(700001,"am");
    for(long sender=700002;sender<=700005;sender++){registration.start(sender);registration.language(sender,"en");registration.exam(sender,exam);registration.contact(sender,sender,"09"+String.format("%08d",sender));}
    var questions=app.getBean(QuestionService.class);var form=new QuestionForm();form.setExamTypeId(exam);form.setCategoryId(category);form.setQuestionText("Fictional restart question");form.setExplanation("Fictional explanation");form.setDifficulty(Difficulty.EASY);form.setSourceType("Original");form.setSourceTitle("Fictional");form.setUseStatus(UseStatus.ORIGINAL);form.setFreePool(true);form.setMockPool(true);form.getOptions().set(0,"One");form.getOptions().set(1,"Two");form.setCorrectOption(0);
+   form.setTags("restart, logic");
    long question=questions.save(null,form,"test-admin");questions.transition(question,QuestionStatus.REVIEWED,questions.get(question).getRevision(),"test-admin");questions.transition(question,QuestionStatus.PUBLISHED,questions.get(question).getRevision(),"test-admin");
    var practice=app.getBean(PracticeService.class);delivery=practice.next(700002,null,null,false).delivery().id();practice.answer(700002,delivery,0);
    var mocks=app.getBean(MockAttemptService.class);attempt=mocks.prepare(700002,"restart").attempt().id();deadline=mocks.open(700002,attempt,0,false).attempt().deadline();mocks.answer(700002,attempt,0,0,0);
    long method=app.getBean(PaymentMethodService.class).save(null,new PaymentMethodService.Form("BANK_TRANSFER","Fictional","Test","NOT-REAL","No money",true,0,null),"test-admin");
    var service=app.getBean(PaymentService.class);
    for(int i=0;i<4;i++) {long sender=700002+i;long id=service.start(sender,"restart").request().id();payments[i]=id;service.select(sender,id,method);if(i>0)service.reference(sender,id,"DEVTEST-RESTART-"+i);if(i>1)service.receipt(sender,id,new ReceiptMetadata("fictional","unique_"+i,"PHOTO",null,"image/jpeg",100));if(i==3)app.getBean(PaymentReviewService.class).approve(id,"test-admin");}
+   settings.maintenance(true,"test-admin");
   }
   try(var app=open(database)) {
+   assertThat(app.getBean(SettingsService.class).current().getMaintenanceEnabled()).isTrue();
+   assertThat(app.getBean(StudentInsights.class).history(700002,false,0).rows()).hasSize(1);
+   assertThat(app.getBean(StudentInsights.class).history(700002,true,0).rows()).hasSize(1);
+   assertThat(app.getBean(JdbcTemplate.class).queryForObject("SELECT tags FROM question_versions LIMIT 1",String.class)).isEqualTo("restart,logic");
+   app.getBean(SettingsService.class).maintenance(false,"test-admin");
    assertThat(app.getBean(RegistrationService.class).start(700001).status()).isEqualTo(RegistrationStatus.EXAM_TYPE_REQUIRED);
    assertThat(app.getBean(PracticeService.class).delivery(700002,delivery).answered()).isTrue();
    var resumed=app.getBean(MockAttemptService.class).open(700002,attempt,null,false);assertThat(resumed.attempt().deadline()).isEqualTo(deadline);assertThat(resumed.item().selected()).isZero();

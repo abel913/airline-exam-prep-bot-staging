@@ -10,6 +10,7 @@ public class QuestionValidationService {
  public QuestionValidationService(ExamTypeRepository e, CategoryRepository c) { exams=e; categories=c; }
  public List<String> errors(QuestionForm f, boolean complete, boolean rightsRequired) {
   List<String> errors=new ArrayList<>();
+  try { f.setTags(QuestionTags.normalize(f.getTags())); } catch(IllegalArgumentException e) { errors.add(e.getMessage()); }
   var exam=f.examTypeId==null?null:exams.findById(f.examTypeId).orElse(null);
   var cat=f.categoryId==null?null:categories.findById(f.categoryId).orElse(null);
   if((complete || f.examTypeId!=null) && exam==null) errors.add("Choose an existing exam type.");

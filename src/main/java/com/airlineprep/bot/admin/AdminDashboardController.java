@@ -28,6 +28,7 @@ public class AdminDashboardController {
     public String login() { return "admin/login"; }
     @GetMapping("/admin")
     public String dashboard(Model model) {
+        model.addAttribute("maintenance",settings.current().getMaintenanceEnabled());
         model.addAttribute("paymentCounts",payments.counts());
         model.addAttribute("questionTotal",questions.count());
         java.util.Map<String,Long> counts=new java.util.LinkedHashMap<>();

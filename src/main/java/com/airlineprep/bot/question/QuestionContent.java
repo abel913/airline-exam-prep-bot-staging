@@ -2,6 +2,10 @@ package com.airlineprep.bot.question;
 import jakarta.persistence.*;
 @Embeddable
 public class QuestionContent {
+ @Column(length=263)
+ String tags = "";
+ public String getTags() { return tags; }
+ public void setTags(String value) { tags=value; }
 
  Long examTypeId;
  public Long getExamTypeId() { return examTypeId; }

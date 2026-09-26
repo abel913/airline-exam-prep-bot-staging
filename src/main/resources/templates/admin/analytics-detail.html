@@ -1,0 +1,5 @@
+<!doctype html><html lang="en" xmlns:th="http://www.thymeleaf.org"><head th:replace="~{admin/fragments :: head('Analytics details')}"></head><body><header th:replace="~{admin/fragments :: header}"></header><div class="shell"><nav th:replace="~{admin/fragments :: nav}"></nav><main>
+<h1 th:text="${report}"></h1><p><a th:href="@{/admin/analytics}">Analytics overview</a></p><dl th:if="${details}"><th:block th:each="d : ${details}"><dt th:text="${d.key}"></dt><dd th:text="${d.value}"></dd></th:block></dl>
+<p>Historical versions keep their original answer keys. Option positions: 0 = A, 1 = B, and so on. Practice counts use first answers; mock counts use final answers in submitted/expired attempts.</p>
+<div th:replace="~{admin/analytics-table :: table}"></div><a th:if="${data.page > 0}" th:href="@{''(page=${data.page-1},window=${param.window})}">Previous</a> <a th:if="${data.more}" th:href="@{''(page=${data.page+1},window=${param.window})}">Next</a>
+</main></div></body></html>

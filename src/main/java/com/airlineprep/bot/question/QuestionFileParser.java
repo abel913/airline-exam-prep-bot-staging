@@ -80,7 +80,7 @@ public class QuestionFileParser {
    Sheet sheet=workbook.getSheetAt(0);
    if(sheet.getLastRowNum()>MAX_ROWS) throw new InvalidFile("At most 500 data rows are allowed.");
    org.apache.poi.ss.usermodel.Row header=sheet.getRow(0);
-   if(header==null||header.getLastCellNum()!=HEADERS.size()) throw new InvalidFile("Use the template headers.");
+   if(header==null||header.getLastCellNum()<HEADERS.size()||header.getLastCellNum()>HEADERS.size()+1) throw new InvalidFile("Use the template headers.");
    List<String> headers=new ArrayList<>();
    for(Cell c:header) { if(c.getCellType()!=CellType.STRING) throw new InvalidFile("Headers must be text."); headers.add(c.getStringCellValue()); }
    headers(headers);
@@ -112,7 +112,8 @@ public class QuestionFileParser {
   return values.values().stream().anyMatch(s->s.length()>MAX_CELL||s.indexOf('\0')>=0)?" Cell too long or contains null bytes.":"";
  }
  private void headers(List<String> headers) {
-  if(headers.size()!=HEADERS.size() || !new HashSet<>(headers).equals(new HashSet<>(HEADERS))) throw new InvalidFile("Headers must match the downloadable template exactly, with no unknown or duplicate columns.");
+  Set<String> expected=new HashSet<>(HEADERS); if(headers.contains("tags")) expected.add("tags");
+  if(headers.size()!=expected.size() || !new HashSet<>(headers).equals(expected)) throw new InvalidFile("Headers must match the template; tags is optional. No unknown or duplicate columns.");
  }
- public byte[] template() { return (String.join(",",HEADERS)+"\r\n").getBytes(StandardCharsets.UTF_8); }
+ public byte[] template() { return (String.join(",",HEADERS)+",tags\r\n").getBytes(StandardCharsets.UTF_8); }
 }

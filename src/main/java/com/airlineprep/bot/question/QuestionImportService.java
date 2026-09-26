@@ -106,6 +106,7 @@ public class QuestionImportService {
  public Page<ImportRow> preview(long id,int page) { get(id);return rows.findByBatchIdOrderByRowNumber(id,PageRequest.of(Math.max(0,page),20)); }
  private QuestionForm convert(Map<String,String> m) {
   QuestionForm f=new QuestionForm();
+  f.setTags(QuestionTags.normalize(m.getOrDefault("tags","")));
   String exam=m.getOrDefault("exam_type","").strip(),category=m.getOrDefault("category","").strip();
   var e=exams.findByCode(exam).orElseThrow(()->new IllegalArgumentException("Unknown exam type code."));
   var c=categories.findByExamTypeIdAndCode(e.getId(),category).orElseThrow(()->new IllegalArgumentException("Unknown category code for this exam type."));

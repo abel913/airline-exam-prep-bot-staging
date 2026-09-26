@@ -1,5 +1,54 @@
 # Airline Exam Preparation Bot
 
+## Compressed Phase 10: product insights
+
+Built on verified Phase 9 baseline `a58e997`. See [PHASE10_REVIEW.md](PHASE10_REVIEW.md)
+for the implementation audit and actual verification/deployment status.
+
+- Telegram now offers Practice History, Mock History, Category Insights and
+  Practice Weak Areas. Histories show five records per page and only the sender's
+  own data. Practice review uses the delivered version, even after archive/edit.
+  Mock history includes prepared, active, completed and zero-answer expired exams;
+  zero-answer expiry still withholds answer-key review and consumes no allowance.
+- Progress keeps first-answer accuracy and free allowances; lifetime users see
+  unlimited access. Category insights require five unique first answers per
+  category. Below 60% suggests more practice; at least 80% is a stronger area.
+  Recommendations choose eligible unanswered weak-category content with variety
+  by least-recent delivery, falling back to normal practice when data/content is
+  insufficient. No AI, public rankings or invasive tracking is involved.
+- Existing question difficulty is preserved. Optional versioned tags accept up
+  to eight comma-separated labels, each 1–32 letters/numbers/spaces/hyphens.
+  Unicode NFKC and lowercase normalization merge duplicates. Admin question
+  filters include difficulty and exact tag and retain filters across pages.
+- CSV/XLSX import accepts both the original headers and the new optional `tags`
+  column. The downloaded template includes it. Quote comma-containing tags in CSV.
+  Existing difficulty validation and all import limits remain in force.
+- `/admin/analytics` provides UTC today/7-day/30-day/all-time aggregates and links
+  to paginated question, category, registration, content, mock, payment, student
+  and outbox reports. Active students have practice answers or mock preparation,
+  opening, answers or completion during the window. Counts show zero when empty.
+- Question summaries explicitly combine historical versions, separating first
+  practice answers from final completed-mock answers and unanswered mock items.
+  Option distribution is per version. Quality signals require ten answers and
+  never change difficulty, publication or content automatically.
+- Authenticated aggregate CSV exports preserve UTF-8/Amharic and neutralize
+  spreadsheet formulas. They include at most 500 rows; use filters to narrow the
+  report. `X-Export-Truncated` identifies truncation. No phone, HMAC, Telegram ID,
+  receipt or transaction reference is exported. Student pages use internal IDs.
+- Maintenance controls are under Analytics and operations, backed by existing
+  settings and audited CSRF-protected POSTs. The admin dashboard displays a banner.
+  Health/admin remain available. Telegram receives a localized retry-later response
+  without executing the requested business action. Saved state remains; existing
+  mock deadlines continue. Disable maintenance to resume normal interaction.
+- Outbox status is read-only here. Existing audited retry on secured payment
+  details remains available; analytics never recreates payment events.
+
+V14 is additive: optional tag metadata, maintenance default false, and query
+indexes. V1–V13 and dependencies remain unchanged. Analytics uses on-demand SQL,
+25-row admin pages and no background collector/cache. Hosting remains FREE TEST/BETA;
+temporary credentials and the documented Spring Boot support limitation remain.
+
+
 ## Compressed Phase 9: free test deployment
 
 See [PRODUCTION_RUNBOOK.md](PRODUCTION_RUNBOOK.md) for Render Docker / Supabase
@@ -33,7 +82,7 @@ deployment exclusions describe their own phase boundaries.
 One Java 21 / Spring Boot application for Telegram exam preparation and a
 Thymeleaf admin website. [PROJECT_SPEC.md](PROJECT_SPEC.md) defines the product rules.
 
-## Current scope: compressed Phase 8
+## Historical scope: compressed Phase 8
 
 - Private-chat registration: /start → English or Amharic → active exam type →
   share your own Telegram contact → registration and free entitlement.

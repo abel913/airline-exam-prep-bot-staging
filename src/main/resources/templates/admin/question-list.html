@@ -12,13 +12,13 @@
 <label>Status<select name="status"><option value="">All except archived</option><option th:each="s : ${statuses}" th:value="${s}" th:text="${s}" th:selected="${status == s}"></option></select></label>
 <label>Pool<select name="pool"><option value="">All pools</option><option value="freePool" th:selected="${pool == 'freePool'}">Free practice</option><option value="premiumPool" th:selected="${pool == 'premiumPool'}">Premium practice</option><option value="mockPool" th:selected="${pool == 'mockPool'}">Mock</option></select></label>
 <label>Rights<select name="rights"><option value="">All rights</option><option th:each="r : ${rights}" th:value="${r}" th:text="${r}" th:selected="${useStatus == r}"></option></select></label>
-<label>Sort<select name="sort"><option value="updatedAt" th:selected="${sort == 'updatedAt'}">Recently updated</option><option value="createdAt" th:selected="${sort == 'createdAt'}">Recently created</option></select></label>
+<label>Difficulty<select name="difficulty"><option value="">All difficulties</option><option th:each="d : ${difficulties}" th:value="${d}" th:text="${d}" th:selected="${difficulty == d}"></option></select></label><label>Tag<input name="tag" maxlength="32" th:value="${tag}"></label><label>Sort<select name="sort"><option value="updatedAt" th:selected="${sort == 'updatedAt'}">Recently updated</option><option value="createdAt" th:selected="${sort == 'createdAt'}">Recently created</option></select></label>
 <button>Filter</button><a th:href="@{/admin/questions}">Clear filters</a></form>
 <p th:text="${rows.totalElements + ' matching questions'}"></p>
 <p class="empty" th:if="${rows.isEmpty()}">No questions match these filters. Clear the filters or create a question.</p>
 <div class="panel" th:each="q : ${rows}"><a th:href="@{/admin/questions/{id}(id=${q.id})}" th:text="${'#'+q.id+' · '+#strings.abbreviate(q.currentVersion.content.questionText,180)}"></a>
 <p><span th:text="${q.status}"></span> · Version <span th:text="${q.currentVersion.versionNumber}"></span> · <span th:text="${q.currentVersion.examName}"></span> / <span th:text="${q.currentVersion.categoryName}"></span></p>
 <p th:text="${q.currentVersion.content.useStatus}"></p></div>
-<a th:if="${rows.hasPrevious()}" th:href="@{/admin/questions(page=${rows.number-1},text=${text},exam=${exam},category=${category},status=${status},pool=${pool},rights=${useStatus},sort=${sort})}">Previous</a>
-<a th:if="${rows.hasNext()}" th:href="@{/admin/questions(page=${rows.number+1},text=${text},exam=${exam},category=${category},status=${status},pool=${pool},rights=${useStatus},sort=${sort})}">Next</a>
+<a th:if="${rows.hasPrevious()}" th:href="@{/admin/questions(page=${rows.number-1},text=${text},exam=${exam},category=${category},status=${status},pool=${pool},rights=${useStatus},sort=${sort},difficulty=${difficulty},tag=${tag})}">Previous</a>
+<a th:if="${rows.hasNext()}" th:href="@{/admin/questions(page=${rows.number+1},text=${text},exam=${exam},category=${category},status=${status},pool=${pool},rights=${useStatus},sort=${sort},difficulty=${difficulty},tag=${tag})}">Next</a>
 </main></div></body></html>

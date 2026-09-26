@@ -1,5 +1,22 @@
 # Airline Exam Preparation Bot — Product and Architecture Specification
 
+Current active milestone: **Compressed Phase 10: Advanced Product Features,
+Analytics & Operational Polish**, based on `a58e997`. This supersedes the Phase 9
+milestone paragraph below while retaining historical decisions. Acceptance status
+is recorded in PHASE10_REVIEW.md. The Phase 10 request authorizes committing and
+pushing passing changes to main, superseding section 16's default for this phase.
+
+Phase 10 adds bounded owned practice/mock history, first-answer category insights,
+deterministic eligible weak-area practice, optional immutable-version tags,
+UTC aggregate analytics, protected formula-safe bounded CSV reports and audited
+maintenance controls. Use existing data; no IP/device tracking, phone/HMAC exports,
+financial evidence analytics or entitlement override. No new dependencies.
+Weak-category minimum is five first answers; weak below 60%, strong at least 80%.
+Quality signals require ten answers and cannot mutate question lifecycle/difficulty.
+V14 adds columns/indexes only; V1–V13 stay immutable. Maintenance responds and asks
+students to retry later without executing business commands; mock deadlines keep
+running. Existing audited notification retries remain on payment details.
+
 ## 1. Authority and current scope
 
 This document is the source of truth for subsequent development of the airline written-exam preparation platform. Read it completely before changing the project. Explicitly agreed requirement changes must be reflected here rather than silently changing product behavior.

@@ -13,6 +13,13 @@ public class SettingsService {
     }
     @Transactional(readOnly = true)
     public AppSettings current() { return settings.findById(1L).orElseThrow(); }
+    @Transactional
+    public void maintenance(boolean enabled,String actor) {
+        AppSettings current=lock();
+        if(current.getMaintenanceEnabled()==enabled) return;
+        changes.record(actor,"MAINTENANCE_CHANGED","settings:1",Boolean.toString(current.getMaintenanceEnabled()),Boolean.toString(enabled));
+        current.setMaintenanceEnabled(enabled);
+    }
     // A short database lock serializes onboarding writes and offer changes.
     // No network calls are performed while this lock is held.
     @Transactional(propagation = org.springframework.transaction.annotation.Propagation.MANDATORY)

@@ -1,0 +1,3 @@
+<!doctype html><html xmlns:th="http://www.thymeleaf.org"><body><div th:fragment="table" class="table-wrap" tabindex="0" aria-label="Scrollable report">
+<p th:if="${data.rows.isEmpty()}">No data for this selection.</p><table th:unless="${data.rows.isEmpty()}"><thead><tr><th scope="col" th:each="h : ${data.headers}" th:text="${#strings.replace(h,'_',' ')}"></th><th scope="col" th:if="${report == 'questions' or report == 'students'}">Details</th></tr></thead>
+<tbody><tr th:each="row : ${data.rows}"><td th:each="cell : ${row}" th:text="${cell}"></td><td th:if="${report == 'questions' or report == 'students'}"><a th:href="@{/admin/analytics/{r}/{id}(r=${report},id=${row[0]},window=${filter.window})}">View details</a></td></tr></tbody></table></div></body></html>

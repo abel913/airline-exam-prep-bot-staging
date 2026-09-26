@@ -32,12 +32,47 @@ public class StudentPresenter {
   var rows=new ArrayList<List<Map<String,String>>>();
   rows.add(List.of(button(lang,"student.practice","p:menu"),button(lang,"student.mock","m:intro")));
   rows.add(List.of(button(lang,"student.progress","s:progress"),button(lang,"student.help","s:help")));
+  rows.add(List.of(button(lang,"history.practice","s:ph:0"),button(lang,"history.mock","s:mh:0")));
+  rows.add(List.of(button(lang,"insights.title","s:weak:0"),button(lang,"insights.practice","s:recommend")));
   rows.add(List.of(button(lang,s.lifetime()?"payment.activeButton":"payment.upgrade","pay:open"),button(lang,"payment.statusButton","pay:status")));
   if(intro.active()!=null) rows.add(List.of(button(lang,"mock.resume","m:o:"+intro.active().id()+":-1")));
   send(chat,message(lang,"student.welcome",allowance(s,false),allowance(s,true)),rows);
  }
  public void categories(long chat,Student s,List<StudentQuestionSelector.CategoryChoice> categories) throws InterruptedException {
   categories(chat,s,categories,0);
+ }
+ public void history(long chat,String lang,boolean mock,StudentInsights.Page<StudentInsights.History> page) throws InterruptedException {
+  StringBuilder text=new StringBuilder(message(lang,mock?"history.mock":"history.practice")).append("\nUTC\n");
+  var rows=new ArrayList<List<Map<String,String>>>();
+  for(var h:page.rows()) {
+   text.append(h.date()).append("\n");
+   if(mock) {
+    text.append(message(lang,"history.status."+h.status())).append("\n");
+    if(h.right()!=null) text.append(message(lang,"history.score",h.right(),h.total(),h.wrong(),h.unanswered(),Math.round(h.right()*10000.0/h.total())/100.0)).append("\n");
+    text.append(h.duration()==null?message(lang,"mock.untimed"):message(lang,"mock.minutes",h.duration())).append("\n");
+    rows.add(List.of(button(lang,h.right()==null?"mock.resume":"mock.resultButton","m:o:"+h.id()+":-1")));
+   } else {
+    text.append(h.category()).append(" — ").append(message(lang,h.correct()?"practice.correct":"practice.incorrect")).append("\n");
+    rows.add(List.of(Map.of("text",message(lang,"history.explanation",h.id()),"callback_data","p:h:"+h.id())));
+   }
+  }
+  if(page.rows().isEmpty()) text.append(message(lang,"history.empty"));
+  paginate(rows,lang,mock?"s:mh:":"s:ph:",page.number(),page.more());
+  send(chat,text.toString(),rows);
+ }
+ public void insights(long chat,String lang,StudentInsights.Page<StudentInsights.Insight> page) throws InterruptedException {
+  StringBuilder text=new StringBuilder(message(lang,"insights.title")).append("\n").append(message(lang,"insights.rule")).append("\n");
+  for(var c:page.rows()) text.append(c.name()).append(": ").append(message(lang,"progress.category",c.name(),c.correct(),c.answered(),c.accuracy()))
+   .append("\n").append(message(lang,c.key())).append("\n");
+  if(page.rows().isEmpty()) text.append(message(lang,"insights.more"));
+  var rows=new ArrayList<List<Map<String,String>>>();
+  rows.add(List.of(button(lang,"insights.practice","s:recommend")));
+  paginate(rows,lang,"s:weak:",page.number(),page.more());send(chat,text.toString(),rows);
+ }
+ private void paginate(List<List<Map<String,String>>> rows,String lang,String prefix,int page,boolean more) {
+  if(page>0) rows.add(List.of(button(lang,"student.previous",prefix+(page-1))));
+  if(more) rows.add(List.of(button(lang,"student.next",prefix+(page+1))));
+  rows.addAll(home(lang));
  }
  public void categories(long chat,Student s,List<StudentQuestionSelector.CategoryChoice> categories,int page) throws InterruptedException {
   String lang=s.language();var rows=new ArrayList<List<Map<String,String>>>();
@@ -118,8 +153,11 @@ public class StudentPresenter {
  public void progress(long chat,StudentProgressService.Progress p) throws InterruptedException {
   String lang=p.student().language();
   String text=message(lang,"progress.summary",p.answered(),p.correct(),p.incorrect(),p.percentage(),allowance(p.student(),false),p.completed(),allowance(p.student(),true));
-  for(var c:p.categories()) text+="\n"+message(lang,"progress.category",c.name(),c.correct(),c.answered(),c.percentage());
+  if(p.student().lifetime()) text+="\n"+message(lang,"payment.activeButton");
+  for(var c:p.categories().stream().limit(20).toList()) text+="\n"+message(lang,"progress.category",c.name(),c.correct(),c.answered(),c.percentage());
   var rows=new ArrayList<List<Map<String,String>>>();
+  rows.add(List.of(button(lang,"insights.title","s:weak:0")));
+  rows.add(List.of(button(lang,"history.practice","s:ph:0"),button(lang,"history.mock","s:mh:0")));
   for(var h:p.recent()) rows.add(List.of(Map.of("text",message(lang,"progress.mock",h.id(),h.correct(),h.total(),h.percentage()),"callback_data","m:f:"+h.id())));
   rows.addAll(home(lang));send(chat,text,rows);
  }

@@ -202,6 +202,52 @@ survive sleep. Telegram receipt availability still depends on Telegram.
 
 ## Backups and isolated restore
 
+### Phase 10 operations
+
+Before deploying Phase 10, take a verified backup with the existing helper. Flyway
+applies `V14__product_insights.sql`: tags default empty, maintenance defaults false,
+and supporting date/version indexes. Do not edit V1–V13 or manually alter live
+schema. The migration is additive. After deployment confirm version 14, health,
+admin analytics and the existing sample's persisted first answer. Leave the Phase
+9 sample published unless the owner requests archiving through normal lifecycle.
+
+Analytics and operations at `/admin/analytics` exposes the maintenance toggle.
+Enable/disable is authenticated, CSRF-protected and audited; repeat submissions
+of the same setting are harmless. Always disable it after a controlled check.
+Requests received during maintenance are acknowledged with a localized retry-later
+response, not queued for later execution. Already committed answers remain;
+an in-flight operation that passed the gate can complete normally. Existing mock
+deadlines continue and expire on subsequent interaction. Health, web admin and
+the existing notification worker remain available.
+
+Analytics is computed on demand using SQL, not background tracking. Admin reports
+page by 25; Telegram histories/insights page by five. Exports are capped at 500 rows
+and include `X-Export-Truncated`. UTF-8 BOM helps spreadsheet applications; formulas
+are neutralized. Keep downloaded reports private and remove smoke-test exports.
+No phone/HMAC, Telegram identifier, receipt or reference is included in exports.
+Students are searchable by internal ID only. Outbox reports contain status,
+attempts and next retry; the existing audited manual retry remains on payment
+detail pages. No new retry mechanism is introduced.
+
+Time windows use UTC calendar dates, including today; all-time starts at the Unix
+epoch. Question practice metrics use first logical-question answers; mock metrics
+use final selected options in submitted/expired exams, including explicit unanswered
+counts. Logical summaries combine versions explicitly; distractors are per-version.
+Mock/payment reports use creation cohorts, whereas payment approval rate uses
+decision dates. Content, students and outbox are current/all-time views. Five first
+answers unlock category insights; ten answers unlock question quality signals.
+
+Inspect query latency and Render memory during real beta use. Indexed aggregations
+still cost more with large histories; pagination bounds output, not total aggregate
+work. No cache or Redis is added. Before substantially scaling, review query plans
+and the existing global mutation lock. Narrow date windows when appropriate.
+
+Restore drills must include V14, tags and maintenance state. A restored database
+may have maintenance enabled; inspect it before serving Telegram. Preserve the
+original HMAC alongside the backup. Prefer forward fixes after deployment; do not
+assume an old binary accepts newer Flyway history without checking it in isolation.
+Never remove migration history or issue destructive down SQL for rollback.
+
 Use matching/newer pg_dump client tooling, the existing environment and private
 storage. Run before a migration/deploy and after meaningful beta data changes;
 if actively testing daily, take a daily copy. The beta recovery point is the last

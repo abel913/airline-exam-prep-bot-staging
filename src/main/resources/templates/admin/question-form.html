@@ -16,7 +16,7 @@
 <div th:each="i : ${#numbers.sequence(0,7)}"><label th:for="${'option-'+i}" th:text="${'Option '+(i+1)}"></label><input th:id="${'option-'+i}" th:field="*{options[__${i}__]}" maxlength="2000">
 <label class="check"><input type="radio" th:field="*{correctOption}" th:value="${i}"> Correct answer</label></div></fieldset>
 <label>Difficulty<select th:field="*{difficulty}"><option th:each="d : ${difficulties}" th:value="${d}" th:text="${d}"></option></select></label>
-<fieldset><legend>Source and rights</legend>
+<label>Tags (comma separated, at most 8)<input th:field="*{tags}" maxlength="263" placeholder="arithmetic, logic"></label><fieldset><legend>Source and rights</legend>
 <label>Source type<input th:field="*{sourceType}" maxlength="100" placeholder="Original practice / textbook / licensed collection"></label>
 <label>Source title<input th:field="*{sourceTitle}" maxlength="300"></label>
 <label>Source reference<input th:field="*{sourceReference}" maxlength="500"></label>

@@ -91,6 +91,13 @@ public class QuestionService {
  }
  @Transactional(readOnly=true)
  public Page<Question> search(String text,Long exam,Long category,QuestionStatus status,String pool,UseStatus rights,int page,String sort) {
+  return search(text,exam,category,status,pool,rights,page,sort,null,"");
+ }
+ @Transactional(readOnly=true)
+ public Page<Question> search(String text,Long exam,Long category,QuestionStatus status,String pool,UseStatus rights,int page,String sort,Difficulty difficulty,String tag) {
+  if(page<0||page>100000||text!=null&&text.length()>200) throw new IllegalArgumentException("Invalid search bounds.");
+  String normalized=QuestionTags.normalize(tag);
+  if(normalized.contains(",")) throw new IllegalArgumentException("Filter by one tag.");
   Specification<Question> spec=(root,query,cb)->{
    var v=root.join("currentVersion"); var c=v.get("content");
    List<jakarta.persistence.criteria.Predicate> p=new ArrayList<>();
@@ -98,6 +105,8 @@ public class QuestionService {
    if(exam!=null) p.add(cb.equal(c.get("examTypeId"),exam));
    if(category!=null) p.add(cb.equal(c.get("categoryId"),category));
    if(rights!=null) p.add(cb.equal(c.get("useStatus"),rights));
+   if(difficulty!=null) p.add(cb.equal(c.get("difficulty"),difficulty));
+   if(!normalized.isEmpty()) p.add(cb.like(cb.concat(cb.concat(",",c.get("tags")),","),"%,"+normalized+",%"));
    if(pool!=null && !pool.isBlank()) {
     if(!List.of("freePool","premiumPool","mockPool").contains(pool)) throw new IllegalArgumentException("Choose a valid pool.");
     p.add(cb.isTrue(c.get(pool)));
