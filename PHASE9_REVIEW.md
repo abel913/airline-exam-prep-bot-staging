@@ -163,9 +163,28 @@ category and one original arithmetic question (3 + 4, correct answer B / 7).
 The question passed through REVIEWED to PUBLISHED; a read-only database check
 confirmed its final status. No direct SQL content writes were used.
 
-Remaining human check: own-contact registration and the Telegram practice, answer
-and Progress display for the published sample. Instructions were provided; actual
-delivery and first-answer/progress persistence have not yet been confirmed.
-Render cold-start time
-is not measured. No live payment/receipt check was performed; automated evidence
-remains authoritative for those workflows. Phase 9 is not yet declared complete.
+The user confirmed PRACTICE AND PROGRESS PASSED in Telegram. An independent
+read-only Supabase query then confirmed exactly one persisted first answer for
+the sample, with one correct answer, and all 13 successful migration records.
+Together these verify live registration/access, question delivery, answer storage,
+progress calculation and Telegram response for the sample.
+
+## Final acceptance
+
+**Phase 9: PASS for FREE TEST/BETA. Ready for Phase 10; Phase 10 not implemented.**
+All required live user checkpoints are resolved. The live product sample is
+published and its first-answer/progress persistence is verified. Existing phases
+remain covered by 417 distinct passing Java checks (414 suite plus 3 PostgreSQL
+integration checks); repeated package and suite runs pass. No code changed during
+the final live acceptance checks.
+
+Limits of evidence: Render cold-start time is not measured. Local Docker engine
+was unavailable; the successful Render deployment supplies Docker build/runtime
+evidence. Render image layers were not independently inspected; secret exclusion
+was checked in tracked sources, packaged application and allowlisted build inputs.
+The one-question sample cannot supply a full mock. Live payment/receipt workflows
+were not run, payment flags remain disabled, and lifetime/payment/receipt evidence
+is automated. Rollback is documented/reviewed, not exercised on the live service.
+These are recorded test/beta limitations, not claims of live verification.
+Temporary credentials must be replaced before serious private/paid production;
+the documented Spring Boot support-line limitation also remains applicable.
