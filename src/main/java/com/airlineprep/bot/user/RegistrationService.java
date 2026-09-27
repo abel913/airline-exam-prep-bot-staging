@@ -60,6 +60,16 @@ public class RegistrationService {
         return view(user, null);
     }
 
+    @Transactional(readOnly = true)
+    public java.util.Optional<RegistrationView> manualPhoneInput(long telegramId) {
+        // Inspect only existing registration state; text must never become a phone identity.
+        return users.findByTelegramUserId(telegramId)
+            .filter(user -> user.getRegistrationStatus() == RegistrationStatus.PHONE_REQUIRED)
+            .map(user -> new RegistrationView(RegistrationStatus.PHONE_REQUIRED,
+                user.getPreferredLanguage() == null ? "en" : user.getPreferredLanguage(),
+                List.of(), "registration.manualPhone", null, null, null));
+    }
+
     public RegistrationView contact(long telegramId, Long contactOwner, String rawPhone) {
         AppSettings offer = settings.lock();
         BotUser user = users.findByTelegramUserId(telegramId).orElse(null);

@@ -64,7 +64,9 @@ class TelegramUpdateHandlerTests {
     @ParameterizedTest @ValueSource(strings = {"hello", "", " ", "/help", "/starting", "/start@OtherBot", "text /start", "0912345678"})
     void unsupportedTextRemainsSafe(String text) throws Exception {
         handler.handle(message(text), "AirlineTestBot");
-        verifyNoInteractions(registration, client);
+        if (!text.isBlank() && !text.startsWith("/")) verify(registration).manualPhoneInput(12);
+        verify(registration, never()).contact(anyLong(), any(), any());
+        verifyNoInteractions(client);
     }
     @Test void nullUpdateIsIgnored() throws Exception { handler.handle(null, "AirlineTestBot"); verifyNoInteractions(client); }
     @Test void callbacksAreAcknowledgedAndLanguagePersisted() throws Exception {
@@ -80,7 +82,77 @@ class TelegramUpdateHandlerTests {
     @Test void examCallbackRequestsOwnContact() throws Exception {
         when(registration.exam(12, 7)).thenReturn(view(RegistrationStatus.PHONE_REQUIRED));
         handler.handle(callback("exam:7"), "AirlineTestBot");
-        verify(client).sendMessage(eq(12L), contains("OWN"), argThat(m -> m.toString().contains("request_contact=true")));
+        verify(client).answerCallbackQuery("query");
+        verify(client).sendMessage(eq(12L), eq(PHONE_PROMPT), eq(contactKeyboard()));
+        verifyNoMoreInteractions(client);
+    }
+    static final String PHONE_PROMPT = "📱 PHONE NUMBER VERIFICATION\n\n"
+        + "To continue registration, share the phone number\nconnected to YOUR Telegram account.\n\n"
+        + "👇 TAP THE BUTTON BELOW 👇\n\nDo not type your phone number manually.";
+    static Map<String,Object> contactKeyboard() {
+        return Map.of("keyboard", List.of(List.of(Map.of("text", "👉 📲 SHARE MY PHONE NUMBER 👈",
+            "request_contact", true))), "resize_keyboard", true, "one_time_keyboard", false, "is_persistent", true);
+    }
+    RegistrationView phoneError(String key) {
+        return new RegistrationView(RegistrationStatus.PHONE_REQUIRED,"en",List.of(),key,null,null,null);
+    }
+    @ParameterizedTest @ValueSource(booleans = {false, true})
+    void manualNumberGetsOneWarningAndPersistentContactButton(boolean webhook) throws Exception {
+        when(registration.manualPhoneInput(12)).thenReturn(java.util.Optional.of(phoneError("registration.manualPhone")));
+        var payments = mock(PaymentFlow.class);
+        var routed = new TelegramUpdateHandler(client, registration, presenter, mock(StudentFlow.class), payments);
+        if (webhook) routed.handleWebhook(message("+251912345678"), "AirlineTestBot");
+        else routed.handle(message("+251912345678"), "AirlineTestBot");
+        verify(client).sendMessage(12L,"⚠️ Please don't type your phone number.\n\n"
+            + "For security, use the button below so Telegram can verify that the number belongs to you.\n\n"
+            + "👇 TAP THE BUTTON BELOW 👇",contactKeyboard());
+        verifyNoMoreInteractions(client);
+        verify(registration,never()).contact(anyLong(),any(),any());
+        verifyNoInteractions(payments);
+    }
+    JsonNode contact(long owner) {
+        var update=(com.fasterxml.jackson.databind.node.ObjectNode)message("");
+        ((com.fasterxml.jackson.databind.node.ObjectNode)update.path("message")).set("contact",
+            mapper.valueToTree(Map.of("user_id",owner,"phone_number","0912345678")));
+        return update;
+    }
+    @Test void wrongContactGetsOneWarningAndKeepsKeyboard() throws Exception {
+        when(registration.contact(12,99L,"0912345678")).thenReturn(phoneError("registration.ownContact"));
+        handler.handle(contact(99),"AirlineTestBot");
+        verify(client).sendMessage(12L,"⚠️ This is not your Telegram-linked phone number.\n\n"
+            + "Please use the button below to share your own number.\n\n👇 TAP THE BUTTON BELOW 👇",contactKeyboard());
+        verifyNoMoreInteractions(client);
+    }
+    @ParameterizedTest @ValueSource(strings={"registration.invalidPhone","registration.duplicatePhone","registration.unavailable"})
+    void otherContactErrorsAlsoKeepOneKeyboard(String key) throws Exception {
+        presenter.show(12,phoneError(key));
+        verify(client).sendMessage(eq(12L),anyString(),eq(contactKeyboard()));
+        verifyNoMoreInteractions(client);
+    }
+    @ParameterizedTest @ValueSource(booleans = {false, true})
+    void ownContactRemovesKeyboardBeforeOpeningExistingMenu(boolean webhook) throws Exception {
+        var students=mock(StudentFlow.class);
+        var routed=new TelegramUpdateHandler(client,registration,presenter,students);
+        when(registration.contact(12,12L,"0912345678")).thenReturn(view(RegistrationStatus.COMPLETED));
+        if(webhook) routed.handleWebhook(contact(12),"AirlineTestBot");
+        else routed.handle(contact(12),"AirlineTestBot");
+        var order=inOrder(client,students);
+        order.verify(client).sendMessage(12L,"✅ Phone number verified successfully.",Map.of("remove_keyboard",true));
+        order.verify(students).menu(12);
+        verifyNoMoreInteractions(client);
+    }
+    @Test void registeredStartOpensMenuWithoutPhonePrompt() throws Exception {
+        var students=mock(StudentFlow.class);
+        when(registration.start(12)).thenReturn(view(RegistrationStatus.COMPLETED));
+        new TelegramUpdateHandler(client,registration,presenter,students).handle(message("/start"),"AirlineTestBot");
+        verify(students).menu(12);verifyNoInteractions(client);
+    }
+    @Test void registeredTextStillReachesPayments() throws Exception {
+        var payments=mock(PaymentFlow.class);
+        var update=message("0912345678");
+        new TelegramUpdateHandler(client,registration,presenter,mock(StudentFlow.class),payments)
+            .handle(update,"AirlineTestBot");
+        verify(payments).message(12,update.path("message"));verifyNoInteractions(client);
     }
     @Test void contactPassesSenderAndOwnerSeparately() throws Exception {
         when(registration.contact(12, 99L, "0912345678")).thenReturn(view(RegistrationStatus.PHONE_REQUIRED));

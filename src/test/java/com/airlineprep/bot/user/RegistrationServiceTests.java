@@ -82,6 +82,24 @@ class RegistrationServiceTests extends IsolatedDatabaseSupport {
         assertThat(registration.contact(sender, sender, "0912345678").status()).isEqualTo(RegistrationStatus.EXAM_TYPE_REQUIRED);
         assertThat(users.findByTelegramUserId(sender).orElseThrow().getPhoneIdentityHash()).isNull();
     }
+    @Test void manualInputOnlyPromptsAtPhoneStepAndNeverGrantsAccess() {
+        assertThat(registration.manualPhoneInput(sender)).isEmpty();
+        assertThat(users.findByTelegramUserId(sender)).isEmpty();
+        registration.start(sender);
+        assertThat(registration.manualPhoneInput(sender)).isEmpty();
+        registration.language(sender,"en");
+        assertThat(registration.manualPhoneInput(sender)).isEmpty();
+        registration.exam(sender,active.getId());
+        assertThat(registration.manualPhoneInput(sender)).hasValueSatisfying(v -> {
+            assertThat(v.errorKey()).isEqualTo("registration.manualPhone");
+            assertThat(v.status()).isEqualTo(RegistrationStatus.PHONE_REQUIRED);
+        });
+        var user=users.findByTelegramUserId(sender).orElseThrow();
+        assertThat(user.getPhoneIdentityHash()).isNull();
+        assertThat(entitlements.findByUserId(user.getId())).isEmpty();
+        registration.contact(sender,sender,"0912345678");
+        assertThat(registration.manualPhoneInput(sender)).isEmpty();
+    }
     @Test void missingAndForeignContactOwnershipNeverCompletes() {
         phoneStep(sender);
         assertThat(registration.contact(sender, null, "0912345678").errorKey()).isEqualTo("registration.ownContact");

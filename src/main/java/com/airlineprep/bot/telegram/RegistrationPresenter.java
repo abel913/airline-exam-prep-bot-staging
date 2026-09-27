@@ -14,7 +14,8 @@ public class RegistrationPresenter {
     }
     public void show(long chatId, RegistrationView view) throws InterruptedException {
         Locale locale = Locale.forLanguageTag(view.language());
-        if (view.errorKey() != null) client.sendMessage(chatId, message(view.errorKey(), locale));
+        if (view.errorKey() != null && view.status() != com.airlineprep.bot.user.RegistrationStatus.PHONE_REQUIRED)
+            client.sendMessage(chatId, message(view.errorKey(), locale));
         switch (view.status()) {
             case LANGUAGE_REQUIRED -> client.sendMessage(chatId, message("registration.language", locale),
                 Map.of("inline_keyboard", List.of(List.of(
@@ -30,9 +31,11 @@ public class RegistrationPresenter {
                     client.sendMessage(chatId, message("registration.exam", locale), Map.of("inline_keyboard", rows));
                 }
             }
-            case PHONE_REQUIRED -> client.sendMessage(chatId, message("registration.phone", locale),
+            case PHONE_REQUIRED -> client.sendMessage(chatId,
+                message(view.errorKey() == null ? "registration.phone" : view.errorKey(), locale),
                 Map.of("keyboard", List.of(List.of(Map.of("text", message("registration.share", locale),
-                    "request_contact", true))), "resize_keyboard", true, "one_time_keyboard", true));
+                    "request_contact", true))), "resize_keyboard", true, "one_time_keyboard", false,
+                    "is_persistent", true));
             case COMPLETED -> client.sendMessage(chatId, messages.getMessage("registration.complete",
                 new Object[]{view.practiceLimit(), view.mockLimit(), view.questionsPerMock()}, locale),
                 Map.of("remove_keyboard", true));

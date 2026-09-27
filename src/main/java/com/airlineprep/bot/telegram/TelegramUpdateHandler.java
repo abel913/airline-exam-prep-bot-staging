@@ -83,7 +83,16 @@ public class TelegramUpdateHandler {
                     && command.substring(7).equalsIgnoreCase(botUsername))) {
                 show(chatId, registration.start(senderId));
                 log.debug("Telegram registration step sent");
-            } else if(payments!=null&&!command.startsWith("/")) payments.message(senderId,message);
+            } else if(!command.startsWith("/")) {
+                if (message.path("text").isTextual() && !text.isBlank()) {
+                    var phonePrompt = registration.manualPhoneInput(senderId);
+                    if (phonePrompt.isPresent()) {
+                        presenter.show(chatId, phonePrompt.get());
+                        return;
+                    }
+                }
+                if(payments!=null) payments.message(senderId,message);
+            }
         } catch (DataAccessException | TransactionException exception) {
             if (retryStorageFailure) throw exception;
             // Database exception details may contain private bind values.
