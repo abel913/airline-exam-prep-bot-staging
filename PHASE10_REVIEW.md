@@ -93,3 +93,23 @@ unit-test fixtures for the injected insight service; preserved the legacy import
 validation wording; flushed a test transaction before checking JDBC maintenance
 state; grouped taxonomy reports by IDs to avoid merging equal display names;
 resolved the Windows smoke-process JAR lock. No destructive repair was used.
+
+## Live deployment verification
+
+The user confirmed PHASE 10 DEPLOYED after commit `b90ec9f` was pushed. Independent
+Supabase inspection confirms 14 successful migrations, latest V14, and maintenance
+false. HTTPS health is UP. Existing private admin credentials still authenticate.
+All nine analytics overview/report routes return 200; anonymous analytics/student
+and CSV requests redirect to login. Maintenance POST without CSRF is rejected.
+The UTF-8 aggregate question CSV retains the original Phase 9 sample and reports
+one first practice answer and one correct answer. No sensitive identifier/evidence
+fields were found in the report pages or export. The export was read in memory;
+no downloaded private CSV file remains. Admin logout succeeded.
+A fresh post-migration Supabase public-schema backup was taken over TLS and its
+archive verified. It remains private/ignored; the V14 restore drill was isolated.
+
+Pending human confirmation: live Telegram Progress/Practice History/review,
+Mock History, insufficient-data category insights and weak-area fallback; safe
+Render log summary. The optional live maintenance toggle has not been exercised;
+maintenance behavior, recovery and persistence passed locally. No final Phase 10
+completion is claimed until the human checkpoint is resolved.
