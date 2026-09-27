@@ -108,8 +108,24 @@ no downloaded private CSV file remains. Admin logout succeeded.
 A fresh post-migration Supabase public-schema backup was taken over TLS and its
 archive verified. It remains private/ignored; the V14 restore drill was isolated.
 
-Pending human confirmation: live Telegram Progress/Practice History/review,
-Mock History, insufficient-data category insights and weak-area fallback; safe
-Render log summary. The optional live maintenance toggle has not been exercised;
-maintenance behavior, recovery and persistence passed locally. No final Phase 10
-completion is claimed until the human checkpoint is resolved.
+The user confirmed PHASE 10 TELEGRAM PASSED for /start, Progress, Practice
+History/review, Mock History, insufficient-data category insights and weak-area
+fallback. The user also confirmed webhook mode and no recurring Render log errors.
+The optional live maintenance toggle was not exercised; maintenance behavior,
+recovery and persistence passed locally. Maintenance remains off in the live beta.
+
+## Final acceptance
+
+**COMPRESSED PHASE 10: PASS. Current compressed roadmap complete through Phase 10.**
+Local regression, PostgreSQL migration/upgrade, backup/restore, browser/security
+checks and required live beta checks passed. No required human action remains.
+The retained Phase 9 sample remains published. No dependencies changed, no V1–V13
+migrations changed, no destructive database operation occurred, and no invasive
+tracking or sensitive analytics/export field was introduced.
+
+Evidence limits remain explicit: maintenance was tested locally rather than
+toggled on the live service; the live mock history is empty, while full mock and
+payment/lifetime flows remain covered by regression fixtures. Resource observations
+are local beta sanity checks, not a capacity guarantee. Temporary credentials,
+Render sleep and the documented Spring Boot support limitation still require
+attention before serious private/paid production. Future ideas remain unimplemented.
