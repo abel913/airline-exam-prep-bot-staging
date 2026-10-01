@@ -17,8 +17,9 @@ public class QuestionController {
  private final QuestionFileParser parser;
  private final ExamTypeRepository exams;
  private final CategoryRepository categories;
- public QuestionController(QuestionService q,QuestionImportService i,QuestionFileParser p,ExamTypeRepository e,CategoryRepository c) {
-  questions=q;imports=i;parser=p;exams=e;categories=c;
+ private final QuestionImportBulkService bulk;
+ public QuestionController(QuestionService q,QuestionImportService i,QuestionFileParser p,ExamTypeRepository e,CategoryRepository c,QuestionImportBulkService bulk) {
+  questions=q;imports=i;parser=p;exams=e;categories=c;this.bulk=bulk;
  }
  @InitBinder("form")
  void binder(org.springframework.web.bind.WebDataBinder binder) { binder.setAutoGrowCollectionLimit(8); }
@@ -43,6 +44,19 @@ public class QuestionController {
  @GetMapping("/{id}")
  String detail(@PathVariable long id,@RequestParam(defaultValue="0") int page,Model m) {
   m.addAttribute("question",questions.get(id));m.addAttribute("history",questions.history(id,page));return "admin/question-detail";
+ }
+ @PostMapping("/{id}/restore")
+ String restore(@PathVariable long id,@RequestParam(defaultValue="false") boolean confirm,Principal actor,RedirectAttributes flash) {
+  if(!confirm) { flash.addFlashAttribute("error","Confirm restoration to Draft before continuing.");return "redirect:/admin/questions/"+id; }
+  try { questions.restoreToDraft(id,actor.getName()); }
+  catch(IllegalArgumentException e) { flash.addFlashAttribute("error",e.getMessage()); }
+  return "redirect:/admin/questions/"+id;
+ }
+ @PostMapping("/{id}/delete")
+ String deleteQuestion(@PathVariable long id,@RequestParam Long expectedRevision,@RequestParam(defaultValue="false") boolean confirm,Principal actor,RedirectAttributes flash) {
+  if(!confirm) { flash.addFlashAttribute("error","Confirm permanent deletion before continuing.");return "redirect:/admin/questions/"+id; }
+  try { questions.deleteSafeDraft(id,expectedRevision,actor.getName());return "redirect:/admin/questions?deleted"; }
+  catch(IllegalArgumentException e) { flash.addFlashAttribute("error",e.getMessage());return "redirect:/admin/questions/"+id; }
  }
  @GetMapping("/{id}/edit")
  String edit(@PathVariable long id,Model m) { m.addAttribute("form",questions.form(id));m.addAttribute("action","/admin/questions/"+id+"/edit");choices(m);return "admin/question-form"; }
@@ -70,7 +84,32 @@ public class QuestionController {
  }
  @GetMapping("/import/{id}")
  String preview(@PathVariable long id,@RequestParam(defaultValue="0") int page,Model m) {
-  m.addAttribute("batch",imports.get(id));m.addAttribute("rows",imports.preview(id,page));return "admin/question-preview";
+  m.addAttribute("batch",imports.get(id));m.addAttribute("rows",imports.preview(id,page));m.addAttribute("questionCounts",imports.questionCounts(id));return "admin/question-preview";
+ }
+ @PostMapping("/import/{id}/review-publish")
+ String reviewPublish(@PathVariable long id,@RequestParam(defaultValue="false") boolean confirm,Principal actor,RedirectAttributes flash) {
+  if(!confirm) { flash.addFlashAttribute("error","Confirm review and publication before continuing.");return "redirect:/admin/questions/import/"+id; }
+  try { flash.addFlashAttribute("bulkResult",bulk.reviewAndPublish(id,actor.getName())); }
+  catch(IllegalArgumentException e) { flash.addFlashAttribute("error",e.getMessage()); }
+  return "redirect:/admin/questions/import/"+id;
+ }
+ @PostMapping("/import/{id}/delete")
+ String deleteImport(@PathVariable long id,@RequestParam(defaultValue="false") boolean confirm,Principal actor,RedirectAttributes flash) {
+  if(!confirm) { flash.addFlashAttribute("error","Confirm import-history deletion before continuing.");return "redirect:/admin/questions/import/"+id; }
+  try { imports.deleteHistory(id,actor.getName());return "redirect:/admin/questions/import?deleted"; }
+  catch(IllegalArgumentException e) { flash.addFlashAttribute("error",e.getMessage());return "redirect:/admin/questions/import/"+id; }
+ }
+ @PostMapping("/import/{id}/clear-invalid")
+ String clearInvalid(@PathVariable long id,@RequestParam(defaultValue="false") boolean confirm,Principal actor,RedirectAttributes flash) {
+  if(!confirm) { flash.addFlashAttribute("error","Confirm removal of invalid staging rows before continuing.");return "redirect:/admin/questions/import/"+id; }
+  try { flash.addFlashAttribute("cleanupCount",imports.clearInvalidRows(id,actor.getName())); }
+  catch(IllegalArgumentException e) { flash.addFlashAttribute("error",e.getMessage()); }
+  return "redirect:/admin/questions/import/"+id;
+ }
+ @PostMapping("/import/clear-cancelled-failed")
+ String clearImports(@RequestParam(defaultValue="false") boolean confirm,Principal actor,RedirectAttributes flash) {
+  if(!confirm) { flash.addFlashAttribute("error","Confirm cancelled and failed history cleanup before continuing.");return "redirect:/admin/questions/import"; }
+  int count=imports.clearCancelledFailed(actor.getName());flash.addFlashAttribute("cleanupCount",count);return "redirect:/admin/questions/import?cleaned";
  }
  @PostMapping("/import/{id}/{action:confirm|cancel}")
  String confirm(@PathVariable long id,@PathVariable String action,Principal actor,RedirectAttributes flash) {

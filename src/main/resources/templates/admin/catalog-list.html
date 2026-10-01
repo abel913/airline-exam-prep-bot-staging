@@ -6,7 +6,7 @@
 <p class="eyebrow">EXAM ORGANIZATION</p><div class="section-title"><h1 th:text="${title}">Catalog</h1>
 <a class="primary button" th:href="@{/admin/{kind}/new(kind=${kind})}">Create new</a></div>
 <p class="muted" th:text="${kind == 'exam-types' ? 'Active exam types are offered during registration.' : 'Organize future question content by exam type.'}"></p>
-<p class="notice" th:if="${param.saved}" role="status">Changes saved.</p>
+<p class="notice" th:if="${param.saved != null or param.deleted != null}" role="status">Changes saved.</p><p class="notice error" role="alert" th:if="${error}" th:text="${error}"></p>
 <section class="panel table-panel">
 <p th:if="${#lists.isEmpty(rows)}" class="empty">Nothing here yet. Create your first entry to get started.</p>
 <table th:unless="${#lists.isEmpty(rows)}"><thead><tr><th>Name</th><th>Code</th><th th:if="${kind == 'categories'}">Exam type</th><th>Order</th><th>Status</th><th>Actions</th></tr></thead>
@@ -14,6 +14,7 @@
 <td th:text="${row.code}"></td><td th:if="${kind == 'categories'}"><span th:each="exam : ${examChoices}" th:if="${exam.id == row.examTypeId}" th:text="${exam.name}"></span></td>
 <td th:text="${row.displayOrder}"></td><td><span class="badge" th:classappend="${row.active ? 'active' : 'inactive'}" th:text="${row.active ? 'Active' : 'Inactive'}"></span></td>
 <td><div class="actions"><a th:href="@{/admin/{kind}/{id}/edit(kind=${kind},id=${row.id})}">Edit</a>
-<form th:action="@{/admin/{kind}/{id}/toggle(kind=${kind},id=${row.id})}" method="post"><button class="link" type="submit" th:text="${row.active ? 'Deactivate' : 'Activate'}"></button></form></div></td>
+<form th:action="@{/admin/{kind}/{id}/toggle(kind=${kind},id=${row.id})}" method="post"><button class="link" type="submit" th:text="${row.active ? 'Deactivate' : 'Activate'}"></button></form>
+<form th:if="${kind == 'categories'}" th:action="@{/admin/categories/{id}/delete(id=${row.id})}" method="post"><label><input type="checkbox" name="confirm" value="true" required th:aria-label="${'Confirm deletion of '+row.name}"> Delete category <span th:text="${row.name}"></span>? This cannot be undone.</label><button class="danger">Delete</button></form></div></td>
 </tr></tbody></table></section><p class="fine">Deactivation preserves existing references and history.</p>
 </main></div></body></html>

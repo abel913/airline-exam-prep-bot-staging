@@ -12,6 +12,8 @@
 <label>Question file<input type="file" name="file" accept=".csv,.xlsx" required></label><button>Upload and preview</button></form>
 <h2>Import history</h2><section class="panel" th:each="b : ${batches}"><a th:href="@{/admin/questions/import/{id}(id=${b.id})}" th:text="${b.filename}"></a>
 <p th:text="${b.status+' · '+b.actor+' · '+b.createdAt}"></p><p th:text="${'Total '+b.totalRows+' / Valid '+b.validRows+' / Invalid '+b.invalidRows+' / Duplicates '+b.duplicateRows+' / Created '+b.importedRows+' / Failed '+b.failedRows}"></p></section>
+<form method="post" th:action="@{/admin/questions/import/clear-cancelled-failed}"><label><input type="checkbox" name="confirm" value="true" required> Delete up to 500 cancelled and failed import-history records and their staging rows. Questions are never deleted.</label><button class="danger">Clear Cancelled / Failed History (up to 500)</button></form>
+<p class="notice" th:if="${param.deleted != null or param.cleaned != null}" role="status">Import history cleanup completed. Questions and question versions were preserved.</p><p th:if="${cleanupCount != null}" th:text="${'Removed '+cleanupCount+' history records.'}"></p>
 <a th:if="${batches.hasPrevious()}" th:href="@{/admin/questions/import(page=${batches.number-1})}">Previous</a>
 <a th:if="${batches.hasNext()}" th:href="@{/admin/questions/import(page=${batches.number+1})}">Next</a>
 </main></div></body></html>

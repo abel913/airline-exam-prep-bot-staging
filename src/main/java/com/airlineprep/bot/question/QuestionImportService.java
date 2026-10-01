@@ -25,9 +25,10 @@ public class QuestionImportService {
  private final SettingsService settings;
  private final AdminChangeService changes;
  private final ObjectMapper json;
+ private final org.springframework.jdbc.core.JdbcTemplate jdbc;
  public QuestionImportService(QuestionFileParser p,ImportBatchRepository b,ImportRowRepository r,QuestionValidationService v,
-  QuestionDuplicateService d,QuestionService q,ExamTypeRepository e,CategoryRepository c,SettingsService s,AdminChangeService a,ObjectMapper j) {
-  parser=p;batches=b;rows=r;validation=v;duplicates=d;questions=q;exams=e;categories=c;settings=s;changes=a;json=j;
+  QuestionDuplicateService d,QuestionService q,ExamTypeRepository e,CategoryRepository c,SettingsService s,AdminChangeService a,ObjectMapper j,org.springframework.jdbc.core.JdbcTemplate jdbc) {
+  parser=p;batches=b;rows=r;validation=v;duplicates=d;questions=q;exams=e;categories=c;settings=s;changes=a;json=j;this.jdbc=jdbc;
  }
  // Parsing occurs before the transaction: no database lock is held while reading a file.
  public QuestionFileParser.Parsed parse(MultipartFile file) { return parser.parse(file); }
@@ -104,6 +105,34 @@ public class QuestionImportService {
  public Page<ImportBatch> history(int page) { return batches.findAll(PageRequest.of(Math.max(0,page),20,Sort.by(Sort.Direction.DESC,"id"))); }
  @Transactional(readOnly=true)
  public Page<ImportRow> preview(long id,int page) { get(id);return rows.findByBatchIdOrderByRowNumber(id,PageRequest.of(Math.max(0,page),20)); }
+ @Transactional(readOnly=true)
+ public Map<String,Long> questionCounts(long id) {
+  get(id);
+  return jdbc.query("SELECT q.status,COUNT(*) AS n FROM question_import_rows r JOIN questions q ON q.id=r.question_id WHERE r.batch_id=? GROUP BY q.status",
+   rs->{Map<String,Long> result=new HashMap<>();while(rs.next())result.put(rs.getString("status"),rs.getLong("n"));return result;},id);
+ }
+ @Transactional
+ public void deleteHistory(long id,String actor) {
+  settings.lock(); ImportBatch b=get(id);
+  // Import rows own the optional question link; delete only these metadata rows, never question records.
+  rows.deleteByBatchId(id); batches.delete(b); batches.flush();
+  changes.record(actor,"IMPORT_HISTORY_DELETED","import:"+id,b.status.name(),"metadata_deleted; questions_preserved");
+ }
+ @Transactional
+ public int clearInvalidRows(long id,String actor) {
+  settings.lock();get(id);int count=rows.deleteInvalidStagingRows(id);
+  if(count>0) changes.record(actor,"IMPORT_INVALID_ROWS_CLEARED","import:"+id,"","deleted:"+count+"; questions_preserved");
+  return count;
+ }
+ @Transactional
+ public int clearCancelledFailed(String actor) {
+  settings.lock(); var page=batches.findByStatusIn(List.of(ImportStatus.CANCELLED,ImportStatus.FAILED),PageRequest.of(0,500));
+  int count=0;
+  for(ImportBatch b:page.getContent()) { rows.deleteByBatchId(b.id);batches.delete(b);count++; }
+  batches.flush();
+  if(count>0) changes.record(actor,"IMPORT_HISTORY_BULK_CLEANUP","imports","","deleted:"+count+"; questions_preserved");
+  return count;
+ }
  private QuestionForm convert(Map<String,String> m) {
   QuestionForm f=new QuestionForm();
   f.setTags(QuestionTags.normalize(m.getOrDefault("tags","")));

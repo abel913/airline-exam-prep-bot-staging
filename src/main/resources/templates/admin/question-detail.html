@@ -6,6 +6,8 @@
 
 <p><a th:href="@{/admin/questions}">Back to questions</a></p>
 <p th:text="${'#'+question.id+' · '+question.status+' · Current version '+question.currentVersion.versionNumber}"></p>
+<form th:if="${question.status.name() == 'ARCHIVED'}" method="post" th:action="@{/admin/questions/{id}/restore(id=${question.id})}"><label><input type="checkbox" name="confirm" value="true" required> Restore this question to Draft so it must pass review before publication.</label><button>Restore to Draft</button></form>
+<form th:if="${question.status.name() == 'DRAFT'}" method="post" th:action="@{/admin/questions/{id}/delete(id=${question.id})}"><input type="hidden" name="expectedRevision" th:value="${question.revision}"><label><input type="checkbox" name="confirm" value="true" required> Delete this unpublished question permanently?</label><button class="danger">Delete Draft</button></form>
 <a th:if="${question.status.name() != 'ARCHIVED'}" th:href="@{/admin/questions/{id}/edit(id=${question.id})}" th:text="${question.status.name() == 'PUBLISHED' ? 'Create draft revision' : 'Edit draft (returns reviewed content to draft)'}"></a>
 <form th:if="${question.status.name() != 'ARCHIVED'}" method="post" th:action="@{/admin/questions/{id}/transition(id=${question.id})}">
 <input type="hidden" name="expectedRevision" th:value="${question.revision}">

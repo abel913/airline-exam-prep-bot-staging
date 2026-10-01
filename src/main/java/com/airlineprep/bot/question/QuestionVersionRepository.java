@@ -6,4 +6,5 @@ public interface QuestionVersionRepository extends JpaRepository<QuestionVersion
  Page<QuestionVersion> findByQuestionIdOrderByVersionNumberDesc(Long id, Pageable page);
  Optional<QuestionVersion> findFirstByContentExamTypeIdAndFingerprintOrderByIdAsc(Long exam, String hash);
  Optional<QuestionVersion> findFirstByContentExamTypeIdAndStemFingerprintOrderByIdAsc(Long exam, String hash);
+ long countByContentCategoryId(Long categoryId);
 }

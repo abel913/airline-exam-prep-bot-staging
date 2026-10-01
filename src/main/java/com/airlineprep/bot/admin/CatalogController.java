@@ -61,4 +61,11 @@ public class CatalogController {
     public String toggle(@PathVariable String kind, @PathVariable long id, Principal admin) {
         catalog.toggle(category(kind),id,admin.getName()); return "redirect:/admin/"+kind+"?saved";
     }
+    @PostMapping("/{id}/delete")
+    public String delete(@PathVariable String kind,@PathVariable long id,@RequestParam(defaultValue="false") boolean confirm,Principal admin,org.springframework.web.servlet.mvc.support.RedirectAttributes flash) {
+        if (!category(kind)) return "redirect:/admin/"+kind;
+        if (!confirm) { flash.addFlashAttribute("error","Confirm category deletion before continuing.");return "redirect:/admin/categories"; }
+        try { catalog.deleteCategory(id,admin.getName()); return "redirect:/admin/categories?deleted"; }
+        catch (IllegalArgumentException ex) { flash.addFlashAttribute("error",ex.getMessage());return "redirect:/admin/categories"; }
+    }
 }

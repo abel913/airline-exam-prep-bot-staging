@@ -74,13 +74,21 @@ class QuestionBankTests extends IsolatedDatabaseSupport {
   long b=stage(List.of(values("Fictional confirm HTTP")));
   mvc.perform(post("/admin/questions/import/"+b+"/confirm").with(user("admin").roles("ADMIN")).with(csrf())).andExpect(status().is3xxRedirection());
   assertThat(imports.get(b).importedRows).isEqualTo(1);
+  mvc.perform(post("/admin/questions/import/"+b+"/review-publish").with(user("admin").roles("ADMIN")).with(csrf()).param("confirm","true"))
+   .andExpect(status().is3xxRedirection()).andExpect(flash().attributeExists("bulkResult"));
+  mvc.perform(get("/admin/questions/import/"+b).with(user("admin").roles("ADMIN"))
+   .flashAttr("bulkResult",new QuestionImportBulkService.Result(1,1,0,0,List.of())))
+   .andExpect(status().isOk()).andExpect(content().string(org.hamcrest.Matchers.containsString("Bulk review and publish result")));
  }
  @Autowired QuestionService questions;
  @Autowired QuestionRepository repository;
+ @Autowired com.airlineprep.bot.category.CategoryRepository categories;
  @Autowired QuestionVersionRepository versions;
  @Autowired QuestionValidationService validation;
  @Autowired QuestionDuplicateService duplicates;
  @Autowired QuestionImportService imports;
+ @Autowired QuestionImportBulkService bulkImports;
+ @Autowired com.airlineprep.bot.audit.AdminChangeRepository changes;
  @Autowired ImportRowRepository rows;
  @Autowired QuestionFileParser parser;
  @Autowired CatalogService catalog;
@@ -232,6 +240,67 @@ class QuestionBankTests extends IsolatedDatabaseSupport {
   assertThatThrownBy(()->imports.confirm(id,"test-admin")).hasMessageContaining("cannot");
   assertThat(repository.count()).isZero();
  }
+ @Test void oneClickBatchReviewPublishUsesLifecycleAndIsRepeatSafeFor101Questions() throws Exception {
+  List<Map<String,String>> content=new ArrayList<>();for(int i=0;i<101;i++)content.add(values("Fictional bulk question "+i));
+  long batch=stage(content);imports.confirm(batch,"test-admin");
+  long reviewed=rows.findByBatchIdOrderByRowNumber(batch).getFirst().questionId;transition(reviewed,QuestionStatus.REVIEWED);
+  var first=bulkImports.reviewAndPublish(batch,"test-admin");em.flush();em.clear();
+  assertThat(first.published()).as(first.toString()).isEqualTo(101);assertThat(first.skipped()).isZero();
+  assertThat(repository.countByStatus(QuestionStatus.PUBLISHED)).isEqualTo(101);
+  var again=bulkImports.reviewAndPublish(batch,"test-admin");
+  assertThat(again.published()).isZero();assertThat(again.alreadyPublished()).isEqualTo(101);
+  assertThat(versions.count()).isEqualTo(101);
+  assertThat(changes.findAll()).extracting(c->c.getAction()).contains("IMPORT_BULK_REVIEW_PUBLISH");
+ }
+ @Test void bulkContinuesAfterRightsRestrictedQuestionAndReportsIt() throws Exception {
+  var allowed=values("Fictional publishable bulk question");var restricted=values("Fictional rights restricted bulk question");
+  restricted.put("copyright_status","UNKNOWN_REVIEW_REQUIRED");var incomplete=values("Fictional incomplete bulk question");
+  long batch=stage(List.of(allowed,restricted,incomplete));imports.confirm(batch,"test-admin");
+  long invalidId=rows.findByBatchIdOrderByRowNumber(batch).get(2).questionId;
+  var invalidDraft=questions.form(invalidId);invalidDraft.explanation="";questions.save(invalidId,invalidDraft,"test-admin");
+  var result=bulkImports.reviewAndPublish(batch,"test-admin");
+  assertThat(result.published()).isEqualTo(1);assertThat(result.skipped()).isEqualTo(2);
+  assertThat(result.failures()).extracting(QuestionImportBulkService.Failure::reason)
+   .anyMatch(reason->reason.contains("UNKNOWN_REVIEW_REQUIRED"))
+   .anyMatch(reason->reason.contains("Explanation"));
+ }
+ @Test void invalidStagingCleanupAndCancelledHistoryCleanupPreserveQuestions() throws Exception {
+  long invalid=stage(List.of(values("Fictional retained valid row"),values("")));
+  assertThat(imports.clearInvalidRows(invalid,"test-admin")).isEqualTo(1);
+  assertThat(imports.preview(invalid,0).getContent()).hasSize(1);
+  long cancelled=stage(List.of(values("Fictional cancelled batch")));imports.cancel(cancelled,"test-admin");
+  assertThat(imports.clearCancelledFailed("test-admin")).isEqualTo(1);
+  assertThat(imports.history(0).getContent()).noneMatch(b->b.getId()==cancelled);
+  assertThat(repository.count()).isZero();
+ }
+ @Test void archivedPublishedQuestionRestoresAsNewDraftVersionAndCanBeRevalidated() {
+  long id=create();publish(id);transition(id,QuestionStatus.ARCHIVED);
+  long before=versions.count();questions.restoreToDraft(id,"test-admin");
+  assertThat(questions.get(id).status).isEqualTo(QuestionStatus.DRAFT);
+  assertThat(questions.get(id).currentVersion.versionNumber).isEqualTo(2);assertThat(versions.count()).isEqualTo(before+1);
+  transition(id,QuestionStatus.REVIEWED);transition(id,QuestionStatus.PUBLISHED);
+  assertThat(questions.get(id).status).isEqualTo(QuestionStatus.PUBLISHED);
+ }
+ @Test void importedHistoryDeletionPreservesQuestionsAndVersions() throws Exception {
+  long batch=stage(List.of(values("Fictional preserved import")));imports.confirm(batch,"test-admin");
+  long id=rows.findByBatchIdOrderByRowNumber(batch).getFirst().questionId;long versionsBefore=versions.count();
+  imports.deleteHistory(batch,"test-admin");
+  assertThat(repository.findById(id)).isPresent();assertThat(versions.count()).isEqualTo(versionsBefore);
+  assertThat(imports.history(0).getContent()).noneMatch(b->b.getId()==batch);
+ }
+ @Test void unusedCategoryDeletesButQuestionHistoryReferencesBlockDelete() {
+  long unused=catalog.save(true,null,new CatalogForm("unused","Unused","",true,0,exam),"test-admin");
+  catalog.deleteCategory(unused,"test-admin");assertThat(categories.findById(unused)).isEmpty();
+  create();assertThatThrownBy(()->catalog.deleteCategory(category,"test-admin")).hasMessageContaining("reference it");
+ }
+ @Test void safeNeverPublishedDraftCanBeDeletedButPublishedQuestionCannot() {
+  long draft=create();long revision=questions.get(draft).revision;questions.deleteSafeDraft(draft,revision,"test-admin");
+  assertThat(repository.findById(draft)).isEmpty();
+  assertThat(changes.findAll()).extracting(c->c.getAction()).contains("QUESTION_DELETED");
+  long published=create();publish(published);
+  assertThatThrownBy(()->questions.deleteSafeDraft(published,questions.get(published).revision,"test-admin"))
+   .hasMessageContaining("Archive it instead");
+ }
  @Test void confirmationRechecksOtherBatchesAndTaxonomy() throws Exception {
   var m=values("Fictional concurrent");
   long a=stage(List.of(m)),b=stage(List.of(m));imports.confirm(a,"test-admin");imports.confirm(b,"test-admin");
@@ -287,7 +356,7 @@ class QuestionBankTests extends IsolatedDatabaseSupport {
   mvc.perform(get(path)).andExpect(status().is3xxRedirection());
   mvc.perform(get(path).with(user("ordinary").roles("USER"))).andExpect(status().isForbidden());
  }
- @ParameterizedTest @ValueSource(strings={"/admin/questions/new","/admin/questions/1/edit","/admin/questions/1/transition","/admin/questions/import/1/confirm","/admin/questions/import/1/cancel"})
+ @ParameterizedTest @ValueSource(strings={"/admin/questions/new","/admin/questions/1/edit","/admin/questions/1/transition","/admin/questions/1/restore","/admin/questions/1/delete","/admin/questions/import/1/confirm","/admin/questions/import/1/cancel","/admin/questions/import/1/review-publish","/admin/questions/import/1/delete","/admin/questions/import/1/clear-invalid","/admin/questions/import/clear-cancelled-failed"})
  void mutationsRequireCsrfAndAdmin(String path) throws Exception {
   mvc.perform(post(path).with(user("admin").roles("ADMIN"))).andExpect(status().isForbidden());
   mvc.perform(post(path).with(csrf())).andExpect(status().is3xxRedirection());

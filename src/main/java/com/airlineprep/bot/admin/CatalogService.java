@@ -3,6 +3,7 @@ package com.airlineprep.bot.admin;
 import java.util.List;
 import com.airlineprep.bot.examtype.*;
 import com.airlineprep.bot.category.*;
+import com.airlineprep.bot.question.QuestionVersionRepository;
 import com.airlineprep.bot.audit.AdminChangeService;
 import com.airlineprep.bot.settings.SettingsService;
 import jakarta.validation.Valid;
@@ -20,9 +21,11 @@ public class CatalogService {
     private final CategoryRepository categories;
     private final SettingsService settings;
     private final AdminChangeService changes;
+    private final QuestionVersionRepository versions;
+    private final org.springframework.jdbc.core.JdbcTemplate jdbc;
     public CatalogService(ExamTypeRepository exams, CategoryRepository categories, SettingsService settings,
-                          AdminChangeService changes) {
-        this.exams = exams; this.categories = categories; this.settings = settings; this.changes = changes;
+                          AdminChangeService changes,QuestionVersionRepository versions,org.springframework.jdbc.core.JdbcTemplate jdbc) {
+        this.exams = exams; this.categories = categories; this.settings = settings; this.changes = changes;this.versions=versions;this.jdbc=jdbc;
     }
     public record Row(Long id, String code, String name, String nameAm, boolean active, int displayOrder, Long examTypeId) {}
     @Transactional(readOnly = true)
@@ -70,6 +73,16 @@ public class CatalogService {
         settings.lock();
         CatalogForm old = form(category,id);
         save(category,id,new CatalogForm(old.code(),old.name(),old.nameAm(),!old.active(),old.displayOrder(),old.examTypeId()),actor);
+        if(category&&old.active()) changes.record(actor,"CATEGORY_DEACTIVATED","category:"+id,old.name(),"inactive");
+    }
+    public void deleteCategory(long id,String actor) {
+        settings.lock(); Category c=categories.findById(id).orElseThrow(this::notFound);
+        long versionReferences=versions.countByContentCategoryId(id);
+        long activityReferences=jdbc.queryForObject("SELECT COUNT(*) FROM practice_deliveries WHERE category_filter=?",Long.class,id);
+        long references=versionReferences+activityReferences;
+        if(references>0) throw new IllegalArgumentException("Cannot delete this category because "+references+" question history or student activity records reference it. Deactivate it instead.");
+        String name=c.getName(); categories.delete(c); categories.flush();
+        changes.record(actor,"CATEGORY_DELETED","category:"+id,name,"deleted");
     }
     private ResponseStatusException notFound() { return new ResponseStatusException(HttpStatus.NOT_FOUND); }
 }

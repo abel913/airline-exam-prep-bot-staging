@@ -20,9 +20,10 @@ public class QuestionService {
  private final AdminChangeService changes;
  private final ExamTypeRepository exams;
  private final CategoryRepository categories;
+ private final org.springframework.jdbc.core.JdbcTemplate jdbc;
  public QuestionService(QuestionRepository q,QuestionVersionRepository v,QuestionValidationService validation,
-   SettingsService s,AdminChangeService a,ExamTypeRepository e,CategoryRepository c) {
-  questions=q; versions=v; this.validation=validation; settings=s; changes=a; exams=e; categories=c;
+   SettingsService s,AdminChangeService a,ExamTypeRepository e,CategoryRepository c,org.springframework.jdbc.core.JdbcTemplate jdbc) {
+  questions=q; versions=v; this.validation=validation; settings=s; changes=a; exams=e; categories=c;this.jdbc=jdbc;
  }
  @Transactional(readOnly=true)
  public Question get(long id) {
@@ -77,8 +78,39 @@ public class QuestionService {
   if(target==QuestionStatus.REVIEWED) { q.currentVersion.reviewedAt=Instant.now(); q.currentVersion.reviewedBy=actor; }
   if(target==QuestionStatus.DRAFT) { q.currentVersion.reviewedAt=null; q.currentVersion.reviewedBy=null; }
   if(target==QuestionStatus.PUBLISHED) q.currentVersion.publishedAt=Instant.now();
-  q.status=target; q.updatedBy=actor;
+  q.status=target; q.updatedBy=actor; questions.saveAndFlush(q);
   changes.record(actor,"QUESTION_"+target,"question:"+id,old.name(),target.name());
+ }
+ public void restoreToDraft(long id,String actor) {
+  settings.lock(); Question q=get(id);
+  if(q.status!=QuestionStatus.ARCHIVED) throw new IllegalArgumentException("Only archived questions can be restored.");
+  QuestionVersion previous=q.currentVersion;
+  if(previous.publishedAt!=null) {
+   QuestionVersion draft=new QuestionVersion(); draft.questionId=q.id; draft.versionNumber=previous.versionNumber+1;
+   draft.createdBy=actor; org.springframework.beans.BeanUtils.copyProperties(previous.content,draft.content);
+   draft.examName=previous.examName; draft.categoryName=previous.categoryName;
+   draft.fingerprint=previous.fingerprint; draft.stemFingerprint=previous.stemFingerprint;
+   for(AnswerOption option:previous.options) draft.options.add(new AnswerOption(option.text,option.correct));
+   versions.saveAndFlush(draft); q.currentVersion=draft;
+  } else {
+   previous.reviewedAt=null; previous.reviewedBy=null;
+  }
+  q.status=QuestionStatus.DRAFT; q.updatedBy=actor; q.contentRevision++; questions.saveAndFlush(q);
+  changes.record(actor,"QUESTION_RESTORED","question:"+id,"ARCHIVED","DRAFT");
+ }
+ public void deleteSafeDraft(long id,Long expected,String actor) {
+  settings.lock();Question q=get(id);stale(q,expected);
+  long published=jdbc.queryForObject("SELECT COUNT(*) FROM question_versions WHERE question_id=? AND published_at IS NOT NULL",Long.class,id);
+  long practice=jdbc.queryForObject("SELECT COUNT(*) FROM practice_deliveries WHERE question_id=?",Long.class,id);
+  long mocks=jdbc.queryForObject("SELECT COUNT(*) FROM mock_items WHERE question_id=?",Long.class,id);
+  long imports=jdbc.queryForObject("SELECT COUNT(*) FROM question_import_rows WHERE question_id=?",Long.class,id);
+  if(q.status!=QuestionStatus.DRAFT||published+practice+mocks+imports>0)
+   throw new IllegalArgumentException("This question has historical usage and cannot be deleted. Archive it instead.");
+  changes.record(actor,"QUESTION_DELETED","question:"+id,"DRAFT","safe unpublished question removed");
+  q.currentVersion=null;questions.saveAndFlush(q);
+  jdbc.update("DELETE FROM question_options WHERE version_id IN (SELECT id FROM question_versions WHERE question_id=?)",id);
+  jdbc.update("DELETE FROM question_versions WHERE question_id=?",id);
+  questions.delete(q);questions.flush();
  }
  private void stale(Question q,Long expected) {
   if(expected==null || expected!=q.revision) throw new IllegalArgumentException("This question changed. Reload before saving.");
