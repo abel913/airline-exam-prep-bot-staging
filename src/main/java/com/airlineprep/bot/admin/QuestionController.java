@@ -18,8 +18,10 @@ public class QuestionController {
  private final ExamTypeRepository exams;
  private final CategoryRepository categories;
  private final QuestionImportBulkService bulk;
- public QuestionController(QuestionService q,QuestionImportService i,QuestionFileParser p,ExamTypeRepository e,CategoryRepository c,QuestionImportBulkService bulk) {
-  questions=q;imports=i;parser=p;exams=e;categories=c;this.bulk=bulk;
+ private final QuestionBulkDeleteService bulkDelete;
+ private final QuestionImportRemovalService importRemoval;
+ public QuestionController(QuestionService q,QuestionImportService i,QuestionFileParser p,ExamTypeRepository e,CategoryRepository c,QuestionImportBulkService bulk,QuestionBulkDeleteService bulkDelete,QuestionImportRemovalService importRemoval) {
+  questions=q;imports=i;parser=p;exams=e;categories=c;this.bulk=bulk;this.bulkDelete=bulkDelete;this.importRemoval=importRemoval;
  }
  @InitBinder("form")
  void binder(org.springframework.web.bind.WebDataBinder binder) { binder.setAutoGrowCollectionLimit(8); }
@@ -38,6 +40,13 @@ public class QuestionController {
   m.addAttribute("difficulty",difficulty);m.addAttribute("tag",tag);
   m.addAttribute("text",text);m.addAttribute("exam",exam);m.addAttribute("category",category);m.addAttribute("status",status);m.addAttribute("pool",pool);m.addAttribute("useStatus",rights);m.addAttribute("sort",sort);
   return "admin/question-list";
+ }
+ @GetMapping("/bulk-delete-drafts")
+ String bulkDeleteConfirm(Model m) { m.addAttribute("plan",bulkDelete.preview());return "admin/question-bulk-delete-confirm"; }
+ @PostMapping("/bulk-delete-drafts")
+ String bulkDelete(@RequestParam(defaultValue="false") boolean confirm,Principal actor,Model m,RedirectAttributes flash) {
+  if(!confirm) { flash.addFlashAttribute("error","Confirm bulk draft deletion before continuing.");return "redirect:/admin/questions/bulk-delete-drafts"; }
+  m.addAttribute("result",bulkDelete.deleteAll(actor.getName()));return "admin/question-bulk-delete-result";
  }
  @GetMapping("/new")
  String create(Model m) { m.addAttribute("form",new QuestionForm());m.addAttribute("action","/admin/questions/new");choices(m);return "admin/question-form"; }
@@ -84,7 +93,18 @@ public class QuestionController {
  }
  @GetMapping("/import/{id}")
  String preview(@PathVariable long id,@RequestParam(defaultValue="0") int page,Model m) {
-  m.addAttribute("batch",imports.get(id));m.addAttribute("rows",imports.preview(id,page));m.addAttribute("questionCounts",imports.questionCounts(id));return "admin/question-preview";
+  m.addAttribute("batch",imports.get(id));m.addAttribute("rows",imports.preview(id,page));m.addAttribute("questionCounts",imports.questionCounts(id));
+  m.addAttribute("removalPlan",importRemoval.preview(id));return "admin/question-preview";
+ }
+ @GetMapping("/import/{id}/remove-questions")
+ String removeImportedQuestionsConfirm(@PathVariable long id,Model m) {
+  m.addAttribute("batch",imports.get(id));m.addAttribute("plan",importRemoval.preview(id));return "admin/question-import-remove-confirm";
+ }
+ @PostMapping("/import/{id}/remove-questions")
+ String removeImportedQuestions(@PathVariable long id,@RequestParam(defaultValue="false") boolean confirm,Principal actor,Model m,RedirectAttributes flash) {
+  if(!confirm) { flash.addFlashAttribute("error","Confirm removal of the questions created by this import.");return "redirect:/admin/questions/import/"+id+"/remove-questions"; }
+  try { m.addAttribute("result",importRemoval.remove(id,actor.getName()));return "admin/question-import-remove-result"; }
+  catch(IllegalArgumentException e) { flash.addFlashAttribute("error",e.getMessage());return "redirect:/admin/questions/import/"+id; }
  }
  @PostMapping("/import/{id}/review-publish")
  String reviewPublish(@PathVariable long id,@RequestParam(defaultValue="false") boolean confirm,Principal actor,RedirectAttributes flash) {

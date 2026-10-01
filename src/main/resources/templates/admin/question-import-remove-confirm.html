@@ -1,0 +1,17 @@
+<!doctype html>
+<html lang="en" xmlns:th="http://www.thymeleaf.org">
+<head th:replace="~{admin/fragments :: head('Remove imported questions')}"></head>
+<body><header th:replace="~{admin/fragments :: header}"></header><div class="shell"><nav th:replace="~{admin/fragments :: nav}"></nav><main>
+<h1>Remove import question batch</h1>
+<p class="notice error" role="alert" th:if="${error}" th:text="${error}"></p>
+<p><a th:href="@{/admin/questions/import/{id}(id=${batch.id})}">Back to import detail</a></p>
+<p>File: <strong th:text="${plan.filename()}"></strong></p>
+<p th:text="${'Questions linked to this import: '+plan.linked()}"></p>
+<h2>Expected handling</h2>
+<ul><li th:text="${'Safe permanent deletion: '+plan.safeDelete()}"></li><li th:text="${'Archive / retire to preserve history: '+plan.archive()}"></li><li th:text="${'Already archived or removed: '+plan.alreadyInactive()}"></li></ul>
+<p class="notice error">This action will remove all questions created by this import from future student use. Unused questions may be permanently deleted. Questions with historical student usage will be archived so previous results remain valid. This action cannot fully restore permanently deleted questions.</p>
+<form method="post" th:action="@{/admin/questions/import/{id}/remove-questions(id=${batch.id})}">
+<label><input type="checkbox" name="confirm" value="true" required> I understand that this affects all questions created by this import.</label>
+<button class="danger">Confirm Removal</button>
+</form>
+</main></div></body></html>

@@ -30,10 +30,10 @@ class QuestionBankTests extends IsolatedDatabaseSupport {
   byte[] data=csv(List.of(values("Fictional BOM")));
   String bom="\uFEFF"+new String(data,StandardCharsets.UTF_8)+"\r\n";
   assertThat(parser.parse(new MockMultipartFile("file","bom.csv","text/csv",bom.getBytes(StandardCharsets.UTF_8))).rows()).hasSize(1);
-  List<Map<String,String>> many=new ArrayList<>();for(int i=0;i<500;i++) many.add(values("Fictional "+i));
-  assertThat(parser.parse(new MockMultipartFile("file","large.csv","text/csv",csv(many))).rows()).hasSize(500);
+  List<Map<String,String>> many=new ArrayList<>();for(int i=0;i<5000;i++) many.add(values("Fictional "+i));
+  assertThat(parser.parse(new MockMultipartFile("file","large.csv","text/csv",csv(many))).rows()).hasSize(5000);
   many.add(values("Too many"));
-  assertThatThrownBy(()->parser.parse(new MockMultipartFile("file","large.csv","text/csv",csv(many)))).hasMessageContaining("500");
+  assertThatThrownBy(()->parser.parse(new MockMultipartFile("file","large.csv","text/csv",csv(many)))).hasMessageContaining("5000");
  }
  @Test void unknownAndDuplicateHeadersRejected() {
   String header=new String(parser.template(),StandardCharsets.UTF_8);
@@ -88,7 +88,11 @@ class QuestionBankTests extends IsolatedDatabaseSupport {
  @Autowired QuestionDuplicateService duplicates;
  @Autowired QuestionImportService imports;
  @Autowired QuestionImportBulkService bulkImports;
+ @Autowired QuestionBulkDeleteService bulkDelete;
+ @Autowired QuestionImportRemovalService importRemoval;
  @Autowired com.airlineprep.bot.audit.AdminChangeRepository changes;
+ @Autowired org.springframework.jdbc.core.JdbcTemplate jdbc;
+ @Autowired com.airlineprep.bot.user.BotUserRepository users;
  @Autowired ImportRowRepository rows;
  @Autowired QuestionFileParser parser;
  @Autowired CatalogService catalog;
@@ -288,6 +292,60 @@ class QuestionBankTests extends IsolatedDatabaseSupport {
   assertThat(repository.findById(id)).isPresent();assertThat(versions.count()).isEqualTo(versionsBefore);
   assertThat(imports.history(0).getContent()).noneMatch(b->b.getId()==batch);
  }
+ @Test void importBatchRemovalDeletesOnlyUnusedAndArchivesPublishedOrUsedQuestions() throws Exception {
+  long batch=stage(List.of(values("Fictional removal safe draft"),values("Fictional removal reviewed"),values("Fictional removal published"),values("Fictional removal used"),values("Fictional removal archived")));
+  imports.confirm(batch,"test-admin");em.flush();List<ImportRow> imported=rows.findByBatchIdOrderByRowNumber(batch);
+  long draft=imported.get(0).questionId,reviewed=imported.get(1).questionId,published=imported.get(2).questionId,used=imported.get(3).questionId,archived=imported.get(4).questionId;
+  transition(reviewed,QuestionStatus.REVIEWED);publish(published);publish(used);transition(used,QuestionStatus.ARCHIVED);questions.restoreToDraft(used,"test-admin");publish(used);transition(used,QuestionStatus.ARCHIVED);
+  transition(archived,QuestionStatus.ARCHIVED);
+  // Add student practice history and a frozen mock item for the two historically used questions.
+  long user=unusedStudentId();Question usedQuestion=questions.get(used);
+  jdbc.update("INSERT INTO practice_deliveries(user_id,question_id,version_id,created_at) VALUES (?,?,?,?)",user,used,usedQuestion.currentVersion.id,java.sql.Timestamp.from(java.time.Instant.now()));
+  jdbc.update("INSERT INTO mock_attempts(user_id,exam_type_id,creation_key,status,question_count,cursor_position,created_at,submitted_at,unanswered_count) VALUES (?,?,?,'SUBMITTED',1,0,?,?,1)",user,exam,"import-remove-"+published,java.sql.Timestamp.from(java.time.Instant.now()),java.sql.Timestamp.from(java.time.Instant.now()));
+  long attempt=jdbc.queryForObject("SELECT MAX(id) FROM mock_attempts",Long.class);
+  jdbc.update("INSERT INTO mock_items(attempt_id,sequence_number,question_id,version_id) VALUES (?,0,?,?)",attempt,published,questions.get(published).currentVersion.id);
+  long oldVersions=versions.count();
+  var plan=importRemoval.preview(batch);
+  assertThat(plan.linked()).as("linked").isEqualTo(5);
+  assertThat(plan.safeDelete()).as("safe delete").isEqualTo(2);
+  assertThat(plan.archive()).as("archive").isEqualTo(1);
+  assertThat(plan.alreadyInactive()).as("already inactive").isEqualTo(2);
+  var result=importRemoval.remove(batch,"test-admin");
+  assertThat(result.failed()).as(result.toString()).isZero();
+  assertThat(result.linked()).as("result linked").isEqualTo(5);
+  assertThat(result.deleted()).as("result deleted").isEqualTo(2);
+  assertThat(result.archived()).as("result archived").isEqualTo(1);
+  assertThat(result.alreadyInactive()).as("result inactive").isEqualTo(2);
+  assertThat(result.failed()).as("result failed").isZero();
+  assertThat(repository.findById(draft)).isEmpty();assertThat(repository.findById(reviewed)).isEmpty();
+  assertThat(questions.get(published).status).isEqualTo(QuestionStatus.ARCHIVED);assertThat(questions.get(used).status).isEqualTo(QuestionStatus.ARCHIVED);
+  assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM practice_deliveries WHERE question_id=?",Integer.class,used)).isEqualTo(1);
+  assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM mock_items WHERE attempt_id=? AND question_id=?",Integer.class,attempt,published)).isEqualTo(1);
+  assertThat(versions.count()).isEqualTo(oldVersions-2);assertThat(imports.get(batch)).isNotNull();
+  assertThat(changes.findAll()).extracting(c->c.getAction()).contains("IMPORT_QUESTIONS_REMOVED");
+  var repeated=importRemoval.remove(batch,"test-admin");assertThat(repeated.linked()).isEqualTo(5);assertThat(repeated.deleted()+repeated.archived()).isZero();assertThat(repeated.alreadyInactive()).isEqualTo(5);
+ }
+ @Test void importBatchMembershipIsExactAnd101RowsAreProcessed() throws Exception {
+  List<Map<String,String>> data=new ArrayList<>();for(int i=0;i<101;i++)data.add(values("Fictional selected import batch row "+i));
+  long selected=stage(data);imports.confirm(selected,"test-admin");em.flush();
+  long other=stage(List.of(values("Fictional other import same exam and category")));imports.confirm(other,"test-admin");em.flush();
+  long unrelated=rows.findByBatchIdOrderByRowNumber(other).getFirst().questionId;
+  var result=importRemoval.remove(selected,"test-admin");
+  assertThat(result.linked()).isEqualTo(101);assertThat(result.deleted()).isEqualTo(101);assertThat(result.failed()).isZero();
+  assertThat(repository.count()).isEqualTo(1);assertThat(questions.get(unrelated).status).isEqualTo(QuestionStatus.DRAFT);
+  assertThat(imports.get(selected)).isNotNull();
+ }
+ @Test void importBatchRemovalAdminCsrfConfirmationAndResultViews() throws Exception {
+  long batch=stage(List.of(values("Fictional web batch removal")));imports.confirm(batch,"test-admin");em.flush();
+  mvc.perform(get("/admin/questions/import/"+batch+"/remove-questions").with(user("admin").roles("ADMIN")))
+   .andExpect(status().isOk()).andExpect(content().string(org.hamcrest.Matchers.containsString("Safe permanent deletion: 1")));
+  mvc.perform(post("/admin/questions/import/"+batch+"/remove-questions").with(user("admin").roles("ADMIN")).param("confirm","true"))
+   .andExpect(status().isForbidden());
+  mvc.perform(post("/admin/questions/import/"+batch+"/remove-questions").with(user("admin").roles("ADMIN")).with(csrf()))
+   .andExpect(status().is3xxRedirection());
+  mvc.perform(post("/admin/questions/import/"+batch+"/remove-questions").with(user("admin").roles("ADMIN")).with(csrf()).param("confirm","true"))
+   .andExpect(status().isOk()).andExpect(content().string(org.hamcrest.Matchers.containsString("Import question removal complete")));
+ }
  @Test void unusedCategoryDeletesButQuestionHistoryReferencesBlockDelete() {
   long unused=catalog.save(true,null,new CatalogForm("unused","Unused","",true,0,exam),"test-admin");
   catalog.deleteCategory(unused,"test-admin");assertThat(categories.findById(unused)).isEmpty();
@@ -300,6 +358,52 @@ class QuestionBankTests extends IsolatedDatabaseSupport {
   long published=create();publish(published);
   assertThatThrownBy(()->questions.deleteSafeDraft(published,questions.get(published).revision,"test-admin"))
    .hasMessageContaining("Archive it instead");
+ }
+ @Test void bulkDeleteRemovesSeveralSafeDraftsAndIsRepeatSafe() {
+  long a=create(),b=questions.save(null,form("Fictional second safe bulk draft"),"test-admin");
+  var plan=bulkDelete.preview();assertThat(plan.drafts()).isEqualTo(2);assertThat(plan.eligible()).isEqualTo(2);
+  var result=bulkDelete.deleteAll("test-admin");
+  assertThat(result.draftsFound()).isEqualTo(2);assertThat(result.deleted()).isEqualTo(2);
+  assertThat(result.skipped()).isZero();assertThat(result.failed()).isZero();
+  assertThat(repository.findById(a)).isEmpty();assertThat(repository.findById(b)).isEmpty();
+  assertThat(changes.findAll()).extracting(c->c.getAction()).contains("BULK_DRAFTS_DELETED");
+  var repeated=bulkDelete.deleteAll("test-admin");assertThat(repeated.draftsFound()).isZero();assertThat(repeated.deleted()).isZero();
+ }
+ @Test void bulkDelete101DraftsUsesBoundedKeysetBatches() {
+  for(int i=0;i<101;i++) questions.save(null,form("Fictional bulk cleanup draft "+i),"test-admin");
+  var result=bulkDelete.deleteAll("test-admin");
+  assertThat(result.draftsFound()).isEqualTo(101);assertThat(result.deleted()).isEqualTo(101);
+  assertThat(repository.count()).isZero();
+ }
+ @Test void bulkDeleteSkipsPreviouslyPublishedAndOtherLifecycleStatuses() {
+  long oldPublished=create();publish(oldPublished);var revision=questions.form(oldPublished);revision.questionText="Fictional edited after publication";questions.save(oldPublished,revision,"test-admin");
+  long published=create();publish(published);
+  long reviewed=create();transition(reviewed,QuestionStatus.REVIEWED);
+  long archived=create();transition(archived,QuestionStatus.ARCHIVED);
+  var plan=bulkDelete.preview();assertThat(plan.drafts()).isEqualTo(1);assertThat(plan.eligible()).isZero();
+  var result=bulkDelete.deleteAll("test-admin");assertThat(result.deleted()).isZero();assertThat(result.skipped()).isEqualTo(1);
+  assertThat(result.issues()).anyMatch(i->i.questionId()==oldPublished&&i.reason().contains("Previously published"));
+  assertThat(repository.findById(reviewed)).isPresent();assertThat(repository.findById(archived)).isPresent();
+  assertThat(questions.get(published).status).isEqualTo(QuestionStatus.PUBLISHED);
+  assertThat(questions.get(oldPublished).status).isEqualTo(QuestionStatus.DRAFT);
+ }
+ @Test void bulkDeleteSkipsPracticeMockAndImportLinkedDrafts() throws Exception {
+  long practice=create();var p=questions.get(practice);long user=unusedStudentId();
+  jdbc.update("INSERT INTO practice_deliveries(user_id,question_id,version_id,created_at) VALUES (?,?,?,?)",user,practice,p.currentVersion.id,java.sql.Timestamp.from(java.time.Instant.now()));
+  long mock=create();var m=questions.get(mock);jdbc.update("INSERT INTO mock_attempts(user_id,exam_type_id,creation_key,status,question_count,cursor_position,created_at,submitted_at,unanswered_count) VALUES (?,?,?,'SUBMITTED',1,0,?,?,1)",user,exam,"bulk-delete-"+mock,java.sql.Timestamp.from(java.time.Instant.now()),java.sql.Timestamp.from(java.time.Instant.now()));
+  long attempt=jdbc.queryForObject("SELECT MAX(id) FROM mock_attempts",Long.class);
+  jdbc.update("INSERT INTO mock_items(attempt_id,sequence_number,question_id,version_id) VALUES (?,0,?,?)",attempt,mock,m.currentVersion.id);
+  long batch=stage(List.of(values("Fictional imported protected draft")));imports.confirm(batch,"test-admin");
+  long imported=rows.findByBatchIdOrderByRowNumber(batch).getFirst().questionId;
+  var result=bulkDelete.deleteAll("test-admin");assertThat(result.deleted()).isZero();assertThat(result.skipped()).isEqualTo(3);
+  assertThat(result.issues()).anyMatch(i->i.questionId()==practice&&i.reason().contains("practice"));
+  assertThat(result.issues()).anyMatch(i->i.questionId()==mock&&i.reason().contains("mock"));
+  assertThat(result.issues()).anyMatch(i->i.questionId()==imported&&i.reason().contains("import/history"));
+  assertThat(repository.findById(practice)).isPresent();assertThat(repository.findById(mock)).isPresent();assertThat(repository.findById(imported)).isPresent();
+ }
+ private long unusedStudentId() {
+  var user=new com.airlineprep.bot.user.BotUser();user.setTelegramUserId(Math.abs(System.nanoTime())+1);user.setRegistrationStatus(com.airlineprep.bot.user.RegistrationStatus.LANGUAGE_REQUIRED);
+  return users.saveAndFlush(user).getId();
  }
  @Test void confirmationRechecksOtherBatchesAndTaxonomy() throws Exception {
   var m=values("Fictional concurrent");
@@ -351,12 +455,12 @@ class QuestionBankTests extends IsolatedDatabaseSupport {
  @Test void corruptXlsxRejected() {
   assertThatThrownBy(()->parser.parse(new MockMultipartFile("file","test.xlsx","application/octet-stream",new byte[]{'P','K',1,2}))).isInstanceOf(IllegalArgumentException.class);
  }
- @ParameterizedTest @ValueSource(strings={"/admin/questions","/admin/questions/new","/admin/questions/1","/admin/questions/1/edit","/admin/questions/import","/admin/questions/import/1","/admin/questions/import/template.csv"})
+ @ParameterizedTest @ValueSource(strings={"/admin/questions","/admin/questions/new","/admin/questions/bulk-delete-drafts","/admin/questions/new","/admin/questions/1","/admin/questions/1/edit","/admin/questions/import","/admin/questions/import/1","/admin/questions/import/1/remove-questions","/admin/questions/import/template.csv"})
  void allReadsRequireAdmin(String path) throws Exception {
   mvc.perform(get(path)).andExpect(status().is3xxRedirection());
   mvc.perform(get(path).with(user("ordinary").roles("USER"))).andExpect(status().isForbidden());
  }
- @ParameterizedTest @ValueSource(strings={"/admin/questions/new","/admin/questions/1/edit","/admin/questions/1/transition","/admin/questions/1/restore","/admin/questions/1/delete","/admin/questions/import/1/confirm","/admin/questions/import/1/cancel","/admin/questions/import/1/review-publish","/admin/questions/import/1/delete","/admin/questions/import/1/clear-invalid","/admin/questions/import/clear-cancelled-failed"})
+ @ParameterizedTest @ValueSource(strings={"/admin/questions/new","/admin/questions/1/edit","/admin/questions/1/transition","/admin/questions/1/restore","/admin/questions/1/delete","/admin/questions/bulk-delete-drafts","/admin/questions/import/1/confirm","/admin/questions/import/1/cancel","/admin/questions/import/1/review-publish","/admin/questions/import/1/delete","/admin/questions/import/1/clear-invalid","/admin/questions/import/1/remove-questions","/admin/questions/import/clear-cancelled-failed"})
  void mutationsRequireCsrfAndAdmin(String path) throws Exception {
   mvc.perform(post(path).with(user("admin").roles("ADMIN"))).andExpect(status().isForbidden());
   mvc.perform(post(path).with(csrf())).andExpect(status().is3xxRedirection());
@@ -364,12 +468,25 @@ class QuestionBankTests extends IsolatedDatabaseSupport {
  }
  @Test void viewsRenderAndEscapeContent() throws Exception {
   var f=form("<script>alert('fictional')</script>");long id=questions.save(null,f,"test-admin");
-  for(String path:List.of("/admin/questions","/admin/questions/new","/admin/questions/"+id,"/admin/questions/"+id+"/edit","/admin/questions/import","/admin")) {
+  for(String path:List.of("/admin/questions","/admin/questions/new","/admin/questions/bulk-delete-drafts","/admin/questions/"+id,"/admin/questions/"+id+"/edit","/admin/questions/import","/admin")) {
    mvc.perform(get(path).with(user("admin").roles("ADMIN"))).andExpect(status().isOk());
   }
   mvc.perform(get("/admin/questions/"+id).with(user("admin").roles("ADMIN"))).andExpect(content().string(org.hamcrest.Matchers.containsString("&lt;script&gt;")));
   long batch=stage(List.of(values("Fictional preview")));
   mvc.perform(get("/admin/questions/import/"+batch).with(user("admin").roles("ADMIN"))).andExpect(status().isOk());
+ }
+ @Test void bulkDeleteConfirmationAndAdminPostWork() throws Exception {
+  long id=create();long protectedId=create();publish(protectedId);var f=questions.form(protectedId);f.questionText="Fictional protected published revision";questions.save(protectedId,f,"test-admin");
+  mvc.perform(get("/admin/questions/bulk-delete-drafts").with(user("admin").roles("ADMIN")))
+   .andExpect(status().isOk()).andExpect(content().string(org.hamcrest.Matchers.containsString("Total DRAFT questions: 2")))
+   .andExpect(content().string(org.hamcrest.Matchers.containsString("Eligible for permanent deletion: 1")));
+  mvc.perform(post("/admin/questions/bulk-delete-drafts").with(user("admin").roles("ADMIN")).with(csrf()))
+   .andExpect(status().is3xxRedirection());assertThat(repository.findById(id)).isPresent();
+  mvc.perform(post("/admin/questions/bulk-delete-drafts").with(user("admin").roles("ADMIN")).with(csrf()).param("confirm","true"))
+   .andExpect(status().isOk()).andExpect(view().name("admin/question-bulk-delete-result"))
+   .andExpect(content().string(org.hamcrest.Matchers.containsString("Drafts found: 2 · Deleted: 1 · Skipped: 1 · Failed: 0")))
+   .andExpect(content().string(org.hamcrest.Matchers.containsString("Previously published")));
+  assertThat(repository.findById(id)).isEmpty();assertThat(repository.findById(protectedId)).isPresent();
  }
  @Test void controllerDraftValidationAndUploadFlow() throws Exception {
   mvc.perform(post("/admin/questions/new").with(user("admin").roles("ADMIN")).with(csrf())

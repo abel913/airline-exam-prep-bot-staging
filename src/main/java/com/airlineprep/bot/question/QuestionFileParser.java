@@ -14,7 +14,7 @@ public class QuestionFileParser {
  private static class InvalidFile extends IllegalArgumentException {
   InvalidFile(String message) { super(message); }
  }
- public static final int MAX_BYTES=2*1024*1024, MAX_ROWS=500, MAX_CELL=12000;
+ public static final int MAX_BYTES=2*1024*1024, MAX_ROWS=5000, MAX_CELL=12000;
  public static final List<String> HEADERS=List.of("exam_type","category","question","option_a","option_b","option_c","option_d","option_e","option_f","option_g","option_h","correct_answer","explanation","difficulty","source_type","source","source_reference","source_year","source_notes","copyright_status","free_available","premium_available","mock_available");
  public record Row(int number,Map<String,String> values,String error) {}
  public record Parsed(String filename,String type,List<Row> rows) {}
@@ -51,7 +51,7 @@ public class QuestionFileParser {
    List<String> headers=parser.getHeaderNames(); headers(headers);
    List<Row> rows=new ArrayList<>();
    for(CSVRecord record:parser) {
-    if(rows.size()>=MAX_ROWS) throw new InvalidFile("At most 500 data rows are allowed.");
+    if(rows.size()>=MAX_ROWS) throw new InvalidFile("At most 5000 data rows are allowed.");
     Map<String,String> values=new LinkedHashMap<>();
     String error=record.size()==headers.size()?"":"Column count does not match headers.";
     for(int i=0;i<Math.min(record.size(),headers.size());i++) values.put(headers.get(i),record.get(i));
@@ -78,7 +78,7 @@ public class QuestionFileParser {
   try(XSSFWorkbook workbook=new XSSFWorkbook(new ByteArrayInputStream(data))) {
    if(workbook.getNumberOfSheets()!=1) throw new InvalidFile("Use exactly one worksheet.");
    Sheet sheet=workbook.getSheetAt(0);
-   if(sheet.getLastRowNum()>MAX_ROWS) throw new InvalidFile("At most 500 data rows are allowed.");
+   if(sheet.getLastRowNum()>MAX_ROWS) throw new InvalidFile("At most 5000 data rows are allowed.");
    org.apache.poi.ss.usermodel.Row header=sheet.getRow(0);
    if(header==null||header.getLastCellNum()<HEADERS.size()||header.getLastCellNum()>HEADERS.size()+1) throw new InvalidFile("Use the template headers.");
    List<String> headers=new ArrayList<>();

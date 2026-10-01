@@ -1,0 +1,16 @@
+<!doctype html>
+<html lang="en" xmlns:th="http://www.thymeleaf.org">
+<head th:replace="~{admin/fragments :: head('Delete eligible drafts')}"></head>
+<body><header th:replace="~{admin/fragments :: header}"></header><div class="shell"><nav th:replace="~{admin/fragments :: nav}"></nav><main>
+<h1>Delete all eligible drafts?</h1>
+<p class="notice error" role="alert" th:if="${error}" th:text="${error}"></p>
+<p th:text="${'Total DRAFT questions: '+plan.drafts()}"></p>
+<p th:text="${'Eligible for permanent deletion: '+plan.eligible()}"></p>
+<p th:text="${'Protected / skipped: '+plan.protectedCount()}"></p>
+<p class="notice error">Eligible draft questions will be permanently deleted. Published, previously published, used, or protected questions will not be deleted. This action cannot be undone.</p>
+<form method="post" th:action="@{/admin/questions/bulk-delete-drafts}">
+<label><input type="checkbox" name="confirm" value="true" required> I understand and confirm deletion of all currently eligible draft questions.</label>
+<button class="danger" th:disabled="${plan.eligible() == 0}">Delete Eligible Drafts</button>
+</form>
+<p><a th:href="@{/admin/questions}">Return to Questions</a></p>
+</main></div></body></html>

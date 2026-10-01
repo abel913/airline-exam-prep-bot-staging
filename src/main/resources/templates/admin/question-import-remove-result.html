@@ -1,0 +1,10 @@
+<!doctype html>
+<html lang="en" xmlns:th="http://www.thymeleaf.org">
+<head th:replace="~{admin/fragments :: head('Import question removal complete')}"></head>
+<body><header th:replace="~{admin/fragments :: header}"></header><div class="shell"><nav th:replace="~{admin/fragments :: nav}"></nav><main>
+<h1>Import question removal complete</h1>
+<p>Import batch: <strong th:text="${result.filename()}"></strong></p>
+<ul><li th:text="${'Questions linked: '+result.linked()}"></li><li th:text="${'Permanently deleted: '+result.deleted()}"></li><li th:text="${'Archived / retired: '+result.archived()}"></li><li th:text="${'Already inactive: '+result.alreadyInactive()}"></li><li th:text="${'Skipped: '+result.skipped()}"></li><li th:text="${'Failed: '+result.failed()}"></li></ul>
+<p>The import history remains available. <a th:href="@{/admin/questions/import}">Return to Import History</a></p>
+<section class="panel" th:if="${!result.issues().isEmpty()}"><h2>Issues</h2><ul><li th:each="issue : ${result.issues()}" th:text="${'Question '+issue.questionId()+' · '+#strings.abbreviate(issue.preview(),100)+' · '+issue.previousStatus()+' · '+issue.action()+' · '+issue.reason()}"></li></ul></section>
+</main></div></body></html>

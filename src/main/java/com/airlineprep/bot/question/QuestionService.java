@@ -98,15 +98,80 @@ public class QuestionService {
   q.status=QuestionStatus.DRAFT; q.updatedBy=actor; q.contentRevision++; questions.saveAndFlush(q);
   changes.record(actor,"QUESTION_RESTORED","question:"+id,"ARCHIVED","DRAFT");
  }
+ public record HardDeleteAssessment(long id,QuestionStatus status,long revision,String preview,boolean eligible,String reason) {}
+ @Transactional(readOnly=true)
+ public List<HardDeleteAssessment> assessHardDelete(List<Long> ids) {
+  if(ids==null||ids.isEmpty()) return List.of();
+  String marks=String.join(",",java.util.Collections.nCopies(ids.size(),"?"));
+  String sql="SELECT q.id,q.status,q.revision,COALESCE(v.question_text,'') AS preview,"
+   +"EXISTS(SELECT 1 FROM question_versions pv WHERE pv.question_id=q.id AND pv.published_at IS NOT NULL) AS previously_published,"
+   +"EXISTS(SELECT 1 FROM practice_deliveries pd WHERE pd.question_id=q.id) AS practice_used,"
+   +"EXISTS(SELECT 1 FROM mock_items mi WHERE mi.question_id=q.id) AS mock_used,"
+   +"EXISTS(SELECT 1 FROM question_import_rows ir WHERE ir.question_id=q.id) AS import_linked "
+   +"FROM questions q LEFT JOIN question_versions v ON v.id=q.current_version_id WHERE q.id IN ("+marks+") ORDER BY q.id";
+  return jdbc.query(sql,(rs,n)->{
+   long id=rs.getLong("id");QuestionStatus status=QuestionStatus.valueOf(rs.getString("status"));
+   boolean published=rs.getBoolean("previously_published"),practice=rs.getBoolean("practice_used"),mock=rs.getBoolean("mock_used"),imported=rs.getBoolean("import_linked");
+   String reason=null;
+   if(published) reason="Previously published. Archive it instead.";
+   else if(status!=QuestionStatus.DRAFT) reason="Question is currently "+status+" and cannot be deleted.";
+   else if(practice) reason="Referenced by practice history.";
+   else if(mock) reason="Linked to mock history.";
+   else if(imported) reason="Protected by import/history relationship.";
+   String preview=rs.getString("preview");if(preview.length()>160)preview=preview.substring(0,160);
+    return new HardDeleteAssessment(rs.getLong("id"),status,rs.getLong("revision"),preview,reason==null,reason);
+  },ids.toArray());
+ }
  public void deleteSafeDraft(long id,Long expected,String actor) {
-  settings.lock();Question q=get(id);stale(q,expected);
-  long published=jdbc.queryForObject("SELECT COUNT(*) FROM question_versions WHERE question_id=? AND published_at IS NOT NULL",Long.class,id);
-  long practice=jdbc.queryForObject("SELECT COUNT(*) FROM practice_deliveries WHERE question_id=?",Long.class,id);
-  long mocks=jdbc.queryForObject("SELECT COUNT(*) FROM mock_items WHERE question_id=?",Long.class,id);
-  long imports=jdbc.queryForObject("SELECT COUNT(*) FROM question_import_rows WHERE question_id=?",Long.class,id);
-  if(q.status!=QuestionStatus.DRAFT||published+practice+mocks+imports>0)
-   throw new IllegalArgumentException("This question has historical usage and cannot be deleted. Archive it instead.");
-  changes.record(actor,"QUESTION_DELETED","question:"+id,"DRAFT","safe unpublished question removed");
+  settings.lock();Question q=questions.findById(id).orElseThrow(()->new ResponseStatusException(HttpStatus.NOT_FOUND));stale(q,expected);
+  HardDeleteAssessment assessment=assessHardDelete(List.of(id)).getFirst();
+  if(!assessment.eligible()) throw new IllegalArgumentException(assessment.reason());
+  hardDelete(q,actor,"safe unpublished question removed");
+ }
+ @Transactional
+ public boolean hardDeleteUnusedImportQuestion(long id,long batchId,String actor) {
+  settings.lock();
+  HardDeleteAssessment assessment=assessImportHardDelete(id,batchId);
+  if(!assessment.eligible()) return false;
+  Question q=questions.findById(id).orElseThrow(()->new ResponseStatusException(HttpStatus.NOT_FOUND));
+  int marked=jdbc.update("UPDATE question_import_rows SET question_id=NULL,removed_question_id=? WHERE batch_id=? AND question_id=?",id,batchId,id);
+  if(marked!=1) throw new IllegalArgumentException("Question is no longer linked to this import batch.");
+  hardDelete(q,actor,"safe unused question removed from import batch "+batchId);
+  return true;
+ }
+ @Transactional(readOnly=true)
+ public HardDeleteAssessment assessImportHardDelete(long id,long batchId) {
+  return assessImportHardDeletes(List.of(id),batchId).stream().findFirst().orElseThrow(()->new ResponseStatusException(HttpStatus.NOT_FOUND));
+ }
+ @Transactional(readOnly=true)
+ public List<HardDeleteAssessment> assessImportHardDeletes(List<Long> ids,long batchId) {
+  if(ids==null||ids.isEmpty()) return List.of();
+  String marks=String.join(",",java.util.Collections.nCopies(ids.size(),"?"));
+  String sql="SELECT q.id,q.status,q.revision,COALESCE(v.question_text,'') AS preview,"
+   +"EXISTS(SELECT 1 FROM question_versions pv WHERE pv.question_id=q.id AND pv.published_at IS NOT NULL) AS previously_published,"
+   +"EXISTS(SELECT 1 FROM practice_deliveries pd WHERE pd.question_id=q.id) AS practice_used,"
+   +"EXISTS(SELECT 1 FROM mock_items mi WHERE mi.question_id=q.id) AS mock_used,"
+   +"EXISTS(SELECT 1 FROM question_import_rows ir WHERE ir.question_id=q.id AND ir.batch_id<>?) AS other_import "
+   +"FROM questions q LEFT JOIN question_versions v ON v.id=q.current_version_id WHERE q.id IN ("+marks+") AND EXISTS(SELECT 1 FROM question_import_rows ir WHERE ir.question_id=q.id AND ir.batch_id=?) ORDER BY q.id";
+  Object[] args=new Object[ids.size()+2];args[0]=batchId;for(int i=0;i<ids.size();i++)args[i+1]=ids.get(i);args[args.length-1]=batchId;
+  return jdbc.query(sql,(rs,n)->{
+   QuestionStatus status=QuestionStatus.valueOf(rs.getString("status"));
+   boolean published=rs.getBoolean("previously_published"),practice=rs.getBoolean("practice_used"),mock=rs.getBoolean("mock_used"),other=rs.getBoolean("other_import");
+   String reason=null;
+   if(published) reason="Previously published; preserve its versions and archive it.";
+   else if(status!=QuestionStatus.DRAFT&&status!=QuestionStatus.REVIEWED) reason="Question is currently "+status+".";
+   else if(practice) reason="Referenced by practice history.";
+   else if(mock) reason="Linked to mock history.";
+   else if(other) reason="Question has another import relationship.";
+   String preview=rs.getString("preview");if(preview.length()>160)preview=preview.substring(0,160);
+   return new HardDeleteAssessment(rs.getLong("id"),status,rs.getLong("revision"),preview,reason==null,reason);
+  },args);
+ }
+ private void hardDelete(Question q,String actor,String detail) {
+  long id=q.id;
+  changes.record(actor,"QUESTION_DELETED","question:"+id,q.status.name(),detail);
+  // The database permits a missing current version only while the logical row is DRAFT.
+  q.status=QuestionStatus.DRAFT;
   q.currentVersion=null;questions.saveAndFlush(q);
   jdbc.update("DELETE FROM question_options WHERE version_id IN (SELECT id FROM question_versions WHERE question_id=?)",id);
   jdbc.update("DELETE FROM question_versions WHERE question_id=?",id);

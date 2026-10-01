@@ -5,6 +5,7 @@
 <h1>Question bank</h1><p class="notice error" role="alert" th:if="${error}" th:text="${error}"></p>
 
 <p><a th:href="@{/admin/questions/new}">Create draft</a> · <a th:href="@{/admin/questions/import}">Import CSV / XLSX</a></p>
+<p><a class="danger button" th:href="@{/admin/questions/bulk-delete-drafts}">Delete All Eligible Drafts</a></p>
 <form method="get" th:action="@{/admin/questions}" class="panel">
 <label>Search<input name="text" th:value="${text}" maxlength="200"></label>
 <label>Exam<select name="exam"><option value="">All exams</option><option th:each="e : ${exams}" th:value="${e.id}" th:text="${e.name}" th:selected="${exam == e.id}"></option></select></label>

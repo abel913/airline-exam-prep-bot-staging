@@ -39,4 +39,7 @@ public class ImportRow extends TimedEntity {
  Long questionId;
  public Long getQuestionId() { return questionId; }
 
+ Long removedQuestionId;
+ public Long getRemovedQuestionId() { return removedQuestionId; }
+
 }
