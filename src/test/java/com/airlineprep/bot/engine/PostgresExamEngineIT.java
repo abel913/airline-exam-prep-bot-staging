@@ -25,6 +25,11 @@ class PostgresExamEngineIT {
  @Autowired jakarta.persistence.EntityManager entityManager;
  @Test void realPostgresFullDefaultMockPracticeHistoricalReviewAndLimits() {
   assertThat(jdbc.queryForObject("SELECT version()",String.class)).contains("PostgreSQL");
+  assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM information_schema.tables WHERE table_schema=current_schema() AND table_name='practice_update_receipts'",Integer.class)).isEqualTo(1);
+  assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM pg_indexes WHERE schemaname=current_schema() AND indexname='practice_update_receipts_delivery_idx'",Integer.class)).isEqualTo(1);
+  assertThat(jdbc.queryForObject("SELECT pg_get_constraintdef(oid) FROM pg_constraint WHERE conrelid='practice_update_receipts'::regclass AND contype='p'",String.class)).isEqualTo("PRIMARY KEY (update_id)");
+  assertThat(jdbc.queryForObject("SELECT pg_get_constraintdef(oid) FROM pg_constraint WHERE conrelid='practice_update_receipts'::regclass AND contype='f'",String.class)).contains("FOREIGN KEY (delivery_id, user_id, question_id) REFERENCES practice_deliveries(id, user_id, question_id)");
+  assertThat(jdbc.queryForObject("SELECT relrowsecurity FROM pg_class WHERE oid='practice_update_receipts'::regclass",Boolean.class)).isTrue();
   String suffix=UUID.randomUUID().toString();long sender=7000000000000L+Math.floorMod(suffix.hashCode(),1000000000);
   long exam=catalog.save(false,null,new CatalogForm("pg-"+suffix,"Fictional PostgreSQL verification","",true,0,null),"verification");
   long category=catalog.save(true,null,new CatalogForm("test","Fictional arithmetic","",true,0,exam),"verification");

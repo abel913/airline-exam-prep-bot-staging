@@ -25,7 +25,10 @@ class PhoneIdentityTests {
         var identity = new PhoneIdentity("dGVzdC1vbmx5LWtleS0zMi1ieXRlcy1ub3QtYS1zZWNyZXQ=", true);
         assertThat(identity.hash(normalizer.normalize("0912345678")))
             .isEqualTo(identity.hash(normalizer.normalize("+251912345678")))
+            .isEqualTo("58c00037a5d53df2352ca0fd6e3588a8a948ae94d0c9813d0b83e721288979cf")
             .hasSize(64).doesNotContain("912345678");
+        assertThat(identity.hash(normalizer.normalize("0712345678")))
+            .isEqualTo("4556fa102b5a987a681c712421fd4b5f43f2e1574ea71b8524d02421cae95c13");
         var other = new PhoneIdentity("YW5vdGhlci10ZXN0LWtleS0zMi1ieXRlcy1ub3QtYS1zZWNyZXQ=", true);
         assertThat(other.hash("+251912345678")).isNotEqualTo(identity.hash("+251912345678"));
     }
