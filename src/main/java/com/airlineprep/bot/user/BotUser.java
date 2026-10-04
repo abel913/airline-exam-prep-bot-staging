@@ -20,6 +20,12 @@ public class BotUser extends TimedEntity {
     @Column(length = 64)
     private String phoneIdentityHash;
 
+    @Column(name = "phone_e164", length = 16)
+    private String phoneE164;
+
+    @Column(name = "phone_verification_status", length = 32)
+    private String phoneVerificationStatus;
+
     private java.time.Instant registrationCompletedAt;
     public Long getId() { return id; }
     public Long getTelegramUserId() { return telegramUserId; }
@@ -32,6 +38,10 @@ public class BotUser extends TimedEntity {
     public void setRegistrationStatus(RegistrationStatus value) { registrationStatus = value; }
     public String getPhoneIdentityHash() { return phoneIdentityHash; }
     public void setPhoneIdentityHash(String value) { phoneIdentityHash = value; }
+    public String getPhoneE164() { return phoneE164; }
+    public void setPhoneE164(String value) { phoneE164 = value; }
+    public String getPhoneVerificationStatus() { return phoneVerificationStatus; }
+    public void setPhoneVerificationStatus(String value) { phoneVerificationStatus = value; }
     public java.time.Instant getRegistrationCompletedAt() { return registrationCompletedAt; }
     public void setRegistrationCompletedAt(java.time.Instant value) { registrationCompletedAt = value; }
 }

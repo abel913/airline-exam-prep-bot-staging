@@ -14,16 +14,20 @@ public class PaymentQueries {
   if(rows.isEmpty()) throw new ExamException("payment.notFound");return rows.getFirst();
  }
  public PaymentRequest own(long id,long user) {var p=get(id);if(p.userId()!=user) throw new ExamException("payment.notFound");return p;}
+ public PaymentRequest open(long user,long exam) {
+  var rows=jdbc.query("SELECT * FROM payment_requests WHERE open_user_id=? AND target_exam_type_id=?",(r,n)->read(r),user,exam);
+  return rows.isEmpty()?null:rows.getFirst();
+ }
  public PaymentRequest open(long user) {
-  var rows=jdbc.query("SELECT * FROM payment_requests WHERE open_user_id=?",(r,n)->read(r),user);
+  var rows=jdbc.query("SELECT * FROM payment_requests WHERE open_user_id=? ORDER BY id DESC LIMIT 1",(r,n)->read(r),user);
   return rows.isEmpty()?null:rows.getFirst();
  }
- public PaymentRequest created(long user,String key) {
-  var rows=jdbc.query("SELECT * FROM payment_requests WHERE user_id=? AND creation_key=?",(r,n)->read(r),user,key);
+ public PaymentRequest created(long user,long exam,String key) {
+  var rows=jdbc.query("SELECT * FROM payment_requests WHERE user_id=? AND target_exam_type_id=? AND creation_key=?",(r,n)->read(r),user,exam,key);
   return rows.isEmpty()?null:rows.getFirst();
  }
- public List<PaymentRequest> history(long user) {
-  return jdbc.query("SELECT * FROM payment_requests WHERE user_id=? ORDER BY id DESC LIMIT 5",(r,n)->read(r),user);
+ public List<PaymentRequest> history(long user,long exam) {
+  return jdbc.query("SELECT * FROM payment_requests WHERE user_id=? AND target_exam_type_id=? ORDER BY id DESC LIMIT 5",(r,n)->read(r),user,exam);
  }
  public List<PaymentRequest> list(String status,Long method,LocalDate date,Long user,int page) {
   String sql="SELECT * FROM payment_requests WHERE 1=1";var args=new ArrayList<Object>();
@@ -46,7 +50,7 @@ public class PaymentQueries {
  private PaymentRequest read(java.sql.ResultSet r) throws java.sql.SQLException {
   ReceiptMetadata receipt=r.getString("receipt_file_id")==null?null:new ReceiptMetadata(r.getString("receipt_file_id"),r.getString("receipt_unique_id"),
    r.getString("receipt_type"),r.getString("receipt_filename"),r.getString("receipt_mime"),r.getLong("receipt_size"));
-  return new PaymentRequest(r.getLong("id"),r.getLong("user_id"),PaymentStatus.valueOf(r.getString("status")),r.getBigDecimal("amount"),r.getString("currency"),
+  return new PaymentRequest(r.getLong("id"),r.getLong("user_id"),r.getLong("target_exam_type_id"),PaymentStatus.valueOf(r.getString("status")),r.getBigDecimal("amount"),r.getString("currency"),
    r.getObject("method_id",Long.class),r.getString("method_type"),r.getString("method_name"),r.getString("account_name"),r.getString("destination"),
    r.getString("instructions"),r.getString("reference"),r.getString("normalized_reference"),receipt,ExamStore.instant(r,"created_at"),
    ExamStore.instant(r,"submitted_at"),ExamStore.instant(r,"reviewed_at"),r.getString("reviewed_by"),r.getString("rejection_reason"));

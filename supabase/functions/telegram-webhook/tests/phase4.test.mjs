@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { MockError, MockService } from "../mock-service.mjs";
 import { PaymentError, PaymentService } from "../payment-service.mjs";
 import { createMockFlow } from "../mock-flow.mjs";
+import { createPaymentFlow } from "../payment-flow.mjs";
 import { message } from "../domain.mjs";
 
 function fixture({duration=2,questions=2,limit=2}={}){
@@ -60,18 +61,22 @@ function paymentFixture({paymentEnabled=true,manualEnabled=true}={}){
   display_name:"Staging Test Transfer",account_name:"TEST ONLY",destination:"NO REAL DESTINATION",
   instructions:"Synthetic staging instructions",active:true}],students:new Map([
    ["tg",{id:"10",telegramId:"10",examId:"1",language:"en",accessLevel:"FREE",practiceLimit:10,practiceUsed:0,mockLimit:2,mocksUsed:0,questionsPerMock:5}],
-   ["tg2",{id:"11",telegramId:"11",examId:"1",language:"en",accessLevel:"FREE",practiceLimit:10,practiceUsed:0,mockLimit:2,mocksUsed:0,questionsPerMock:5}],
-  ])};
+  ["tg2",{id:"11",telegramId:"11",examId:"1",language:"en",accessLevel:"FREE",practiceLimit:10,practiceUsed:0,mockLimit:2,mocksUsed:0,questionsPerMock:5,entitlements:{"1":"FREE","2":"FREE"}}],
+  ])};state.students.get("tg").entitlements={"1":"FREE","2":"FREE"};state.exams=new Set(["1","2"]);
  const unit={
   async student(tg){return state.students.get(tg)??null;},
+  async studentForExam(tg,exam){const s=state.students.get(tg);if(!s||!state.exams.has(String(exam)))return null;const grants=s.entitlements??{"1":s.accessLevel};
+   if(!(exam in grants))return null;return {...s,examId:exam,accessLevel:grants[exam]};},
   async config(){return{payment_enabled:paymentEnabled,manual_payment_enabled:manualEnabled,lifetime_price:"123.45",currency:"ETB",support_info:""};},
-  async request(id,user){const r=state.requests.get(String(id));return r&&r.user_id===user?r:null;},
+  async request(id,user,exam){const r=state.requests.get(String(id));return r&&r.user_id===user&&r.target_exam_type_id===exam?r:null;},
+  async requestOwned(id,user){const r=state.requests.get(String(id));return r&&r.user_id===user?r:null;},
   async open(user){return [...state.requests.values()].find(r=>r.open_user_id===user)??null;},
-  async creation(user,key){return [...state.requests.values()].find(r=>r.user_id===user&&r.creation_key===key)??null;},
+  async creation(user,exam,key){return [...state.requests.values()].find(r=>r.user_id===user&&r.target_exam_type_id===exam&&r.creation_key===key)??null;},
   async history(user){return [...state.requests.values()].filter(r=>r.user_id===user);},
+  async exams(tg){const s=state.students.get(tg);if(!s)throw new PaymentError("student.register");return{language:s.language,exams:Object.entries(s.entitlements).filter(([id])=>state.exams.has(id)).map(([id,tier])=>({id,name:id==="1"?"Synthetic A":"Synthetic B",nameAm:"",current:id===s.examId,tier}))};},
   async methods(){return state.methods.filter(m=>m.active);},
   async method(id){return state.methods.find(m=>m.id===String(id))??null;},
-  async create(s,key,c){const id=String(state.next++),r={id,user_id:s.id,open_user_id:s.id,creation_key:key,status:"SELECT_METHOD",
+  async create(s,key,c){const id=String(state.next++),r={id,user_id:s.id,target_exam_type_id:s.examId,open_user_id:s.id,creation_key:key,status:"SELECT_METHOD",
    amount:c.lifetime_price,currency:c.currency,method_id:null,method_type:null,method_name:null,account_name:null,destination:null,
    instructions:null,reference:null,normalized_reference:null,receipt_file_id:null,receipt_unique_id:null,receipt_type:null,
    receipt_filename:null,receipt_mime:null,receipt_size:null,created_at:new Date(1000).toISOString(),submitted_at:null,rejection_reason:null};
@@ -158,17 +163,47 @@ test("receipt metadata accepts only bounded Telegram image and PDF metadata",()=
 test("payment settings gate new requests and price is read from staging settings",async()=>{
  const off=paymentFixture({paymentEnabled:false}),v=await off.service.status("tg");
  assert.equal(v.enabled,false);assert.equal(v.price,"123.45");assert.equal(v.currency,"ETB");
- await assert.rejects(off.service.start("tg","disabled-key"),e=>e instanceof PaymentError&&e.key==="payment.disabled");
+ await assert.rejects(off.service.start("tg","1","disabled-key"),e=>e instanceof PaymentError&&e.key==="payment.disabled");
  assert.equal(off.state.requests.size,0);
- const on=paymentFixture();const request=await on.service.start("tg","payment-key");
+ const on=paymentFixture();const request=await on.service.start("tg","1","payment-key");
  assert.equal(request.request.amount,"123.45");assert.equal(request.request.currency,"ETB");
 });
+test("explicit purchase targets preserve current exam and scope retry keys by exam",async()=>{
+ const f=paymentFixture();const a=await f.service.start("tg","1","same-key");
+ assert.equal((await f.service.start("tg","1","same-key")).request.id,a.request.id);
+ assert.equal(f.state.students.get("tg").examId,"1");assert.equal(a.request.examId,"1");
+ await f.service.cancel("tg",a.request.id);
+ const b=await f.service.start("tg","2","same-key");
+ assert.notEqual(b.request.id,a.request.id);assert.equal(b.request.examId,"2");
+ assert.equal(f.state.students.get("tg").examId,"1");
+});
+test("payment target validation checks target tier, activity and entitlement",async()=>{
+ const f=paymentFixture(),student=f.state.students.get("tg");student.entitlements["2"]="LIFETIME";
+ await assert.rejects(f.service.start("tg","2","lifetime-target"),e=>e instanceof PaymentError&&e.key==="payment.lifetime");
+ student.entitlements["1"]="LIFETIME";student.entitlements["2"]="FREE";
+ const free=await f.service.start("tg","2","free-target");assert.equal(free.request.examId,"2");
+ await f.service.cancel("tg",free.request.id);f.state.exams.delete("2");
+ await assert.rejects(f.service.start("tg","2","inactive-target"),e=>e instanceof PaymentError&&e.key==="student.invalid");
+ await assert.rejects(f.service.start("tg","999","missing-target"),e=>e instanceof PaymentError&&e.key==="student.invalid");
+});
+test("upgrade Telegram flow displays tiers and starts only the explicitly selected target",async()=>{
+ const f=paymentFixture(),sent=[];
+ const flow=createPaymentFlow(f.service,{async sendMessage(...args){sent.push(args);}});
+ await flow.callback("10","tg","pay:open","edge-open");
+ const exams=sent.at(-1)[2].inline_keyboard.flat();
+ assert.ok(exams.some(b=>b.text.includes("Synthetic A — Free")&&b.callback_data==="pay:exam:1"));
+ assert.ok(exams.some(b=>b.text==="Synthetic B — Free"&&b.callback_data==="pay:exam:2"));
+ await flow.callback("10","tg","pay:exam:2","edge-target");
+ const req=[...f.state.requests.values()][0];
+ assert.equal(req.target_exam_type_id,"2");
+ assert.equal(f.state.students.get("tg").examId,"1");
+});
 test("payment method, reference, receipt and duplicate update handling preserve request identity",async()=>{
- const f=paymentFixture(),started=await f.service.start("tg","request-key"),id=started.request.id;
+ const f=paymentFixture(),started=await f.service.start("tg","1","request-key"),id=started.request.id;
  await f.service.select("tg",id,"1");
  const ref=await f.service.reference("tg",id," Stg_Ref-001 ");
  assert.equal(ref.request.status,"AWAITING_RECEIPT");assert.equal(ref.request.reference,"Stg_Ref-001");
- const other=await f.service.start("tg2","other-key");await f.service.select("tg2",other.request.id,"1");
+ const other=await f.service.start("tg2","1","other-key");await f.service.select("tg2",other.request.id,"1");
  await assert.rejects(f.service.reference("tg2",other.request.id,"stg_ref-001"),
   e=>e instanceof PaymentError&&e.key==="payment.duplicateReference");
  const receipt={fileId:"file1",uniqueId:"unique1",type:"PHOTO",filename:null,mime:"image/jpeg",size:2048};

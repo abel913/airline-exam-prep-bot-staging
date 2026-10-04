@@ -15,20 +15,21 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 class PracticeDeliveryMigrationTests {
     @Test
-    void migratesFreshSchemaAndV16UpgradeWithRetryReceipts() throws Exception {
+    void migratesFreshSchemaAndV16UpgradeThroughPhase5() throws Exception {
         String url = "jdbc:h2:mem:practice-v16-" + UUID.randomUUID() + ";DB_CLOSE_DELAY=-1;LOCK_TIMEOUT=10000";
         assertUpgrade(url, "sa");
         String freshUrl = "jdbc:h2:mem:practice-fresh-" + UUID.randomUUID() + ";DB_CLOSE_DELAY=-1;LOCK_TIMEOUT=10000";
         Flyway fresh = Flyway.configure().dataSource(freshUrl, "sa", "").load();
-        assertThat(fresh.migrate().targetSchemaVersion).isEqualTo("17");
+        assertThat(fresh.migrate().targetSchemaVersion).isEqualTo("19");
         try (var connection = DriverManager.getConnection(freshUrl, "sa", "")) {
             assertReceiptSchema(connection);
+            assertPhase5Schema(connection);
         }
     }
 
     @Test
     @EnabledIfEnvironmentVariable(named = "PG_MIGRATION_TEST_URL", matches = "jdbc:postgresql://127\\.0\\.0\\.1:55433/[A-Za-z0-9_]+")
-    void upgradesDisposableLocalPostgresV16ToV17() throws Exception {
+    void upgradesDisposableLocalPostgresV16ThroughPhase5() throws Exception {
         assertUpgrade(System.getenv("PG_MIGRATION_TEST_URL"), "postgres");
     }
 
@@ -43,11 +44,18 @@ class PracticeDeliveryMigrationTests {
             }
         }
 
+        Flyway v17 = Flyway.configure().dataSource(url, username, "")
+                .target(MigrationVersion.fromVersion("17")).load();
+        assertThat(v17.migrate().targetSchemaVersion).isEqualTo("17");
+        try (var connection = DriverManager.getConnection(url, username, "")) {
+            assertReceiptSchema(connection);
+        }
         Flyway latest = Flyway.configure().dataSource(url, username, "").load();
-        assertThat(latest.migrate().targetSchemaVersion).isEqualTo("17");
+        assertThat(latest.migrate().targetSchemaVersion).isEqualTo("19");
         latest.validate();
         try (var connection = DriverManager.getConnection(url, username, "")) {
             assertReceiptSchema(connection);
+            assertPhase5Schema(connection);
         }
     }
 
@@ -85,5 +93,31 @@ class PracticeDeliveryMigrationTests {
                 assertThat(security.getBoolean(1)).isTrue();
             }
         }
+    }
+
+    private void assertPhase5Schema(Connection connection) throws Exception {
+        var metadata=connection.getMetaData();
+        boolean postgres=metadata.getDatabaseProductName().equalsIgnoreCase("PostgreSQL");
+        String schema=postgres?"public":"PUBLIC";
+        for (var item : java.util.List.of(new String[]{"bot_users","phone_e164"},
+                new String[]{"bot_users","phone_verification_status"},
+                new String[]{"access_entitlements","exam_type_id"},
+                new String[]{"payment_requests","target_exam_type_id"},
+                new String[]{"lifetime_access_grants","exam_type_id"},
+                new String[]{"practice_usage","exam_type_id"},
+                new String[]{"practice_deliveries","exam_type_id"})) {
+            try (var columns=metadata.getColumns(null,schema,postgres?item[0]:item[0].toUpperCase(Locale.ROOT),
+                    postgres?item[1]:item[1].toUpperCase(Locale.ROOT))) {
+                assertThat(columns.next()).as(item[0]+"."+item[1]).isTrue();
+            }
+        }
+        var uniqueIndexes=new java.util.LinkedHashMap<String,java.util.List<String>>();
+        try(var indexes=metadata.getIndexInfo(null,schema,postgres?"mock_attempts":"MOCK_ATTEMPTS",true,false)) {
+            while(indexes.next()) {
+                String name=indexes.getString("INDEX_NAME"),column=indexes.getString("COLUMN_NAME");
+                if(name!=null&&column!=null) uniqueIndexes.computeIfAbsent(name,ignored->new java.util.ArrayList<>()).add(column.toUpperCase(Locale.ROOT));
+            }
+        }
+        assertThat(uniqueIndexes.values()).contains(java.util.List.of("ACTIVE_USER_ID"));
     }
 }

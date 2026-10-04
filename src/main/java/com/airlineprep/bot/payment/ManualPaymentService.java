@@ -15,24 +15,31 @@ public class ManualPaymentService implements PaymentService {
  public ManualPaymentService(StudentAccess a,SettingsService s,ExamStore db,PaymentQueries q,PaymentMethodService m,PaymentAuditService log,PaymentNotificationOutbox o,Clock c) {
   access=a;settings=s;store=db;queries=q;methods=m;audit=log;outbox=o;clock=c;
  }
- public View status(long sender) {var s=access.lock(sender);return view(s,queries.open(s.id()),0);}
- public View start(long sender,String key) {
-  var s=access.lock(sender);
+ public View status(long sender) {
+  var current=access.lock(sender);var open=queries.open(current.id());
+  var s=open==null?current:access.lock(sender,open.examTypeId());
+  return view(s,open,0);
+ }
+ public View start(long sender,long targetExamId,String key) {
+  var s=access.lock(sender,targetExamId);
   if(s.lifetime()) throw new ExamException("payment.lifetime");
   if(key==null||!key.matches("[a-z0-9-]{1,64}")) throw new ExamException("student.invalid");
-  var old=queries.created(s.id(),key);if(old!=null) return view(s,old,0);
-  var open=queries.open(s.id());if(open!=null) return view(s,open,0);
+  var old=queries.created(s.id(),targetExamId,key);if(old!=null) return view(s,old,0);
+  var open=queries.open(s.id());if(open!=null) {
+   if(open.examTypeId()!=targetExamId) throw new ExamException("payment.state");
+   return view(s,open,0);
+  }
   requireEnabled();var cfg=settings.current();
-  long id=store.insert("payment_requests",ExamStore.values("user_id",s.id(),"open_user_id",s.id(),"creation_key",key,
+  long id=store.insert("payment_requests",ExamStore.values("user_id",s.id(),"target_exam_type_id",targetExamId,"open_user_id",s.id(),"creation_key",key,
    "status","SELECT_METHOD","amount",cfg.getLifetimePrice(),"currency",cfg.getCurrency(),"created_at",clock.instant()));
   log(s,id,"PAYMENT_REQUEST_CREATED");return view(s,queries.get(id),0);
  }
  public View methods(long sender,long request,int page) {
-  var s=access.lock(sender);var p=queries.own(request,s.id());p.status().require(PaymentStatus.SELECT_METHOD);
+  var current=access.lock(sender);var p=queries.own(request,current.id());var s=access.lock(sender,p.examTypeId());p.status().require(PaymentStatus.SELECT_METHOD);
   if(page<0||page>1000000) throw new ExamException("student.invalid");return view(s,p,page);
  }
  public View select(long sender,long request,long method) {
-  var s=access.lock(sender);var p=queries.own(request,s.id());
+  var current=access.lock(sender);var p=queries.own(request,current.id());var s=access.lock(sender,p.examTypeId());
   if(Objects.equals(p.methodId(),method)) return view(s,p,0);
   p.status().require(PaymentStatus.SELECT_METHOD);requireEnabled();
   var m=methods.get(method).details();if(!m.active()) throw new ExamException("payment.methodInvalid");
@@ -47,7 +54,7 @@ public class ManualPaymentService implements PaymentService {
   return original.toUpperCase(Locale.ROOT);
  }
  public View reference(long sender,long request,String input) {
-  var s=access.lock(sender);var p=queries.own(request,s.id());String normalized=normalizeReference(input);
+  var current=access.lock(sender);var p=queries.own(request,current.id());var s=access.lock(sender,p.examTypeId());String normalized=normalizeReference(input);
   if(normalized.equals(p.normalizedReference())) return view(s,p,0);
   p.status().require(PaymentStatus.AWAITING_REFERENCE);
   if(store.jdbc().queryForObject("SELECT COUNT(*) FROM payment_requests WHERE normalized_reference=?",Long.class,normalized)>0)
@@ -56,7 +63,7 @@ public class ManualPaymentService implements PaymentService {
   log(s,request,"PAYMENT_REFERENCE_SUBMITTED");return view(s,queries.get(request),0);
  }
  public View receipt(long sender,long request,ReceiptMetadata receipt) {
-  var s=access.lock(sender);var p=queries.own(request,s.id());
+  var current=access.lock(sender);var p=queries.own(request,current.id());var s=access.lock(sender,p.examTypeId());
   if(receipt==null) throw new ExamException("payment.receiptInvalid");
   if(receipt.equals(p.receipt())) return view(s,p,0);
   p.status().require(PaymentStatus.AWAITING_RECEIPT);
@@ -66,7 +73,7 @@ public class ManualPaymentService implements PaymentService {
   outbox.enqueue(request,"ADMIN_PENDING",s);return view(s,queries.get(request),0);
  }
  public View cancel(long sender,long request) {
-  var s=access.lock(sender);var p=queries.own(request,s.id());
+  var current=access.lock(sender);var p=queries.own(request,current.id());var s=access.lock(sender,p.examTypeId());
   if(p.status()==PaymentStatus.CANCELLED) return view(s,p,0);
   if(!p.status().cancellable()) throw new ExamException("payment.state");
   store.jdbc().update("UPDATE payment_requests SET status='CANCELLED',open_user_id=NULL WHERE id=?",request);
@@ -77,7 +84,7 @@ public class ManualPaymentService implements PaymentService {
  private View view(Student s,PaymentRequest p,int page) {
   var cfg=settings.current();
   return new View(s,p,p!=null&&p.status()==PaymentStatus.SELECT_METHOD&&enabled()?methods.list(true,page):List.of(),
-   enabled(),cfg.getLifetimePrice(),cfg.getCurrency(),cfg.getSupportInfo(),page,queries.history(s.id()));
+   enabled(),cfg.getLifetimePrice(),cfg.getCurrency(),cfg.getSupportInfo(),page,queries.history(s.id(),s.examId()));
  }
  private void log(Student s,long id,String action) {audit.append("USER",Long.toString(s.id()),action,"PAYMENT",id,"");}
 }

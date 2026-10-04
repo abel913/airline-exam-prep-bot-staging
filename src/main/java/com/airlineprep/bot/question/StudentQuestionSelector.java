@@ -28,10 +28,10 @@ public class StudentQuestionSelector {
   String sql="SELECT v.id "+ELIGIBLE+" AND (v.free_pool=true OR (?=true AND v.premium_pool=true))"+
    (category==null?"":" AND c.id=?")+
    (review?" AND EXISTS":" AND NOT EXISTS")+
-   " (SELECT 1 FROM practice_usage u WHERE u.user_id=? AND u.question_id=q.id)"+
-   " ORDER BY COALESCE((SELECT MAX(d.id) FROM practice_deliveries d WHERE d.user_id=? AND d.question_id=q.id),0),q.id LIMIT 1";
+   " (SELECT 1 FROM practice_usage u WHERE u.user_id=? AND u.exam_type_id=? AND u.question_id=q.id)"+
+   " ORDER BY COALESCE((SELECT MAX(d.id) FROM practice_deliveries d WHERE d.user_id=? AND d.exam_type_id=? AND d.question_id=q.id),0),q.id LIMIT 1";
   List<Object> args=new ArrayList<>(List.of(s.examId(),s.lifetime()));
-  if(category!=null) args.add(category);args.add(s.id());args.add(s.id());
+  if(category!=null) args.add(category);args.add(s.id());args.add(s.examId());args.add(s.id());args.add(s.examId());
   var ids=jdbc.query(sql,(r,n)->r.getLong(1),args.toArray());return ids.isEmpty()?null:ids.getFirst();
  }
  // Randomization is encapsulated in this selector; selection stays bounded in the database.

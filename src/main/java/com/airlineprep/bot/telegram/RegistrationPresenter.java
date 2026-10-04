@@ -31,6 +31,12 @@ public class RegistrationPresenter {
                     client.sendMessage(chatId, message("registration.exam", locale), Map.of("inline_keyboard", rows));
                 }
             }
+            case EXAM_SWITCH_REQUIRED -> {
+                var rows = view.exams().stream().map(e -> List.of(Map.of(
+                    "text", (e.current() ? "✅ " : "") + ("am".equals(view.language()) && !e.nameAm().isBlank() ? e.nameAm() : e.name()),
+                    "callback_data", "exam:" + e.id()))).toList();
+                client.sendMessage(chatId, message("registration.switchExam", locale), Map.of("inline_keyboard", rows));
+            }
             case PHONE_REQUIRED -> client.sendMessage(chatId,
                 message(view.errorKey() == null ? "registration.phone" : view.errorKey(), locale),
                 Map.of("keyboard", List.of(List.of(Map.of("text", message("registration.share", locale),

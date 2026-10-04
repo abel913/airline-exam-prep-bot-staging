@@ -55,7 +55,7 @@ test("home menu loads a single profile and preserves registered menu callbacks",
   await f.flow.callback("77", "77", "s:home", "100");
   assert.deepEqual(f.calls, [["profile", "77"]]);
   assert.deepEqual(f.sent[0][2].inline_keyboard.flat().map((item) => item.callback_data), [
-    "p:menu", "m:intro", "s:progress", "s:help", "s:ph:0", "s:mh:0", "s:weak:0", "s:recommend", "pay:open", "pay:status",
+    "p:menu", "m:intro", "s:progress", "s:help", "s:ph:0", "s:mh:0", "s:weak:0", "s:recommend", "pay:open", "pay:status", "s:exams",
   ]);
 });
 

@@ -2,11 +2,12 @@
 param()
 
 $ErrorActionPreference = 'Stop'
-$dbName = 'airline_exam_bot_phase4_test'
-$runner = 'airline_exam_bot_phase4_runner'
+$dbName = 'airline_exam_bot_phase5_test'
+$runner = 'airline_exam_bot_phase5_runner'
 $adminDb = 'postgres'
 $root = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
 $testFile = Join-Path $root 'supabase/functions/telegram-webhook/tests/phase4.postgres.test.ts'
+$practiceTestFile = Join-Path $root 'supabase/functions/telegram-webhook/tests/practice.postgres.test.ts'
 $javaTest = Join-Path $root 'src/test/java/com/airlineprep/bot/payment/Phase4PostgresIT.java'
 $oldEnv = @{}
 $envNames = @('PGPASSWORD','PGHOST','PGPORT','PGUSER','PGDATABASE','DATABASE_URL','SPRING_DATASOURCE_URL','SPRING_DATASOURCE_USERNAME','SPRING_DATASOURCE_PASSWORD','SPRING_FLYWAY_URL','SPRING_FLYWAY_USER','SPRING_FLYWAY_PASSWORD','SPRING_APPLICATION_JSON','SPRING_PROFILES_ACTIVE','FLYWAY_URL','FLYWAY_USER','FLYWAY_PASSWORD','EDGE_TEST_DATABASE_URL','PHASE4_PG_HOST','PHASE4_PG_DATABASE','PHASE4_PG_TEST_USER','PHASE4_PG_TEST_PASSWORD','DB_HOST','DB_PORT','DB_NAME','DB_USERNAME','DB_PASSWORD','TELEGRAM_BOT_TOKEN','TELEGRAM_WEBHOOK_SECRET','PHONE_IDENTITY_HMAC_KEY','TELEGRAM_ADMIN_ID')
@@ -79,14 +80,14 @@ try {
         Stop-Safely 'Repository Supabase project reference does not match the staging allowlist.'
     }
     $failureStage = 'Flyway migration inventory'
-    if (-not (Test-Path -LiteralPath $testFile) -or -not (Test-Path -LiteralPath $javaTest)) { Stop-Safely 'Phase 4 integration test source is missing.' }
+    if (-not (Test-Path -LiteralPath $testFile) -or -not (Test-Path -LiteralPath $practiceTestFile) -or -not (Test-Path -LiteralPath $javaTest)) { Stop-Safely 'Phase 4 integration test source is missing.' }
     $sqlMigrations = @(Get-ChildItem (Join-Path $root 'src/main/resources/db/migration') -Filter 'V*__*.sql' -File |
         ForEach-Object { if ($_.Name -match '^V([0-9]+)__') { [int]$Matches[1] } } | Sort-Object -Unique)
     $javaMigrations = @(Get-ChildItem (Join-Path $root 'src/main/java/db/migration') -Filter 'V*__*.java' -File |
         ForEach-Object { if ($_.Name -match '^V([0-9]+)__') { [int]$Matches[1] } } | Sort-Object -Unique)
-    if (($sqlMigrations + $javaMigrations | Sort-Object -Unique).Count -ne 17 -or
-        ($sqlMigrations + $javaMigrations | Sort-Object -Unique)[-1] -ne 17 -or
-        16 -notin $javaMigrations -or 17 -notin $javaMigrations) { Stop-Safely 'Expected the complete SQL and Java Flyway migration set V1–V17.' }
+    if (($sqlMigrations + $javaMigrations | Sort-Object -Unique).Count -ne 19 -or
+        ($sqlMigrations + $javaMigrations | Sort-Object -Unique)[-1] -ne 19 -or
+        16 -notin $javaMigrations -or 17 -notin $javaMigrations -or 18 -notin $javaMigrations -or 19 -notin $javaMigrations) { Stop-Safely 'Expected the complete SQL and Java Flyway migration set V1–V19.' }
 
     $failureStage = 'local PostgreSQL service and client discovery'
     $service = Get-Service -Name 'postgresql-x64-18' -ErrorAction SilentlyContinue
@@ -138,43 +139,49 @@ try {
     $dbExists = Invoke-LocalPsql $adminDb "SELECT COUNT(*) FROM pg_database WHERE datname='$dbName';" -Quiet
     if ($dbExists -eq '0') { Invoke-LocalPsql $adminDb "CREATE DATABASE $dbName OWNER $runner;" -Quiet | Out-Null }
     $dbOwner = Invoke-LocalPsql $adminDb "SELECT pg_get_userbyid(datdba) FROM pg_database WHERE datname='$dbName';" -Quiet
-    if ($dbOwner -cne $runner) { Stop-Safely 'The named Phase 4 database exists but is not owned by the dedicated test role; refusing to use or modify it.' }
+    if ($dbOwner -cne $runner) { Stop-Safely 'The named Phase 5 database exists but is not owned by the dedicated test role; refusing to use or modify it.' }
     $publicTables = Invoke-LocalPsql $dbName "SELECT COUNT(*) FROM pg_tables WHERE schemaname='public' AND tablename NOT IN ('flyway_schema_history');" -Quiet
     if ([int]$publicTables -gt 0) {
         $hasFlyway = Invoke-LocalPsql $dbName "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema='public' AND table_name='flyway_schema_history';" -Quiet
         if ($hasFlyway -ne '1') { Stop-Safely 'The existing named test database contains tables but no Flyway history; refusing to overwrite unknown data.' }
         $version = Invoke-LocalPsql $dbName "SELECT COALESCE(MAX(version::int),0) FROM flyway_schema_history WHERE success;" -Quiet
-        if ([int]$version -gt 17) { Stop-Safely 'The isolated test database has a migration newer than V17.' }
-        if ([int]$version -ne 17) { Stop-Safely 'The isolated test database must already be at Flyway V17 before synthetic cleanup is considered.' }
+        if ([int]$version -gt 19) { Stop-Safely 'The isolated test database has a migration newer than V19.' }
+        if ([int]$version -notin @(17,18,19)) { Stop-Safely 'The isolated test database must be at Flyway V17, V18, or V19 before synthetic cleanup is considered.' }
 
         # The integration fixtures are rooted only by their exact synthetic exam
         # markers. Deno uses phase4- plus eight hex digits; Spring uses the fixed
         # phase4test code. Related rows are removed only through those exam/user/
         # question/payment relationships and the exact fixture author strings.
         # Counts are emitted before deletes. All changes are one local transaction.
-        $failureStage = 'counting and removing exact Phase 4 synthetic fixtures'
+        $failureStage = 'counting and removing exact integration synthetic fixtures'
         $cleanupSql = @'
 BEGIN;
-CREATE TEMP TABLE _p4_exam_ids ON COMMIT DROP AS
+CREATE TEMP TABLE _p4_exam_ids AS
   SELECT id FROM exam_types
   WHERE (code='phase4test' AND name='Synthetic Phase 4 Exam')
-     OR (code ~ '^phase4-[0-9a-f]{8}$' AND name='Synthetic Phase 4 Test Exam');
-CREATE TEMP TABLE _p4_user_ids ON COMMIT DROP AS
+     OR (code ~ '^phase4-[0-9a-f]{8}$' AND name='Synthetic Phase 4 Test Exam')
+     OR (code ~ '^edge-[0-9a-f]{8}$' AND name='Synthetic Edge Test Exam');
+CREATE TEMP TABLE _p4_user_ids AS
   SELECT u.id FROM bot_users u JOIN _p4_exam_ids e ON e.id=u.selected_exam_type_id
   WHERE u.registration_status='COMPLETED' AND u.phone_identity_hash ~ '^[0-9a-f]{64}$'
     AND EXISTS (SELECT 1 FROM access_entitlements ae WHERE ae.user_id=u.id AND ae.grant_source='REGISTRATION');
-CREATE TEMP TABLE _p4_question_ids ON COMMIT DROP AS
+CREATE TEMP TABLE _p4_question_ids AS
   SELECT DISTINCT q.id FROM questions q JOIN question_versions v ON v.question_id=q.id
   JOIN _p4_exam_ids e ON e.id=v.exam_type_id
-  WHERE q.created_by IN ('phase4-test','phase4-local-test')
+  WHERE (q.created_by IN ('phase4-test','phase4-local-test')
     AND v.created_by IN ('phase4-test','phase4-local-test')
     AND ((v.source_title='Synthetic Phase 4 test' AND v.exam_name='Synthetic Phase 4 Test Exam')
-      OR (v.source_title='Synthetic local integration fixture' AND v.exam_name='Synthetic Phase 4 Exam'));
-CREATE TEMP TABLE _p4_attempt_ids ON COMMIT DROP AS
+      OR (v.source_title='Synthetic local integration fixture' AND v.exam_name='Synthetic Phase 4 Exam')))
+    OR (q.created_by='edge-test' AND v.created_by='edge-test'
+      AND v.source_title='Synthetic Edge fixtures' AND v.exam_name='Synthetic Edge Test Exam'
+      AND v.exam_type_id IN (SELECT id FROM _p4_exam_ids));
+CREATE TEMP TABLE _p4_attempt_ids AS
   SELECT id FROM mock_attempts WHERE user_id IN (SELECT id FROM _p4_user_ids);
-CREATE TEMP TABLE _p4_request_ids ON COMMIT DROP AS
+CREATE TEMP TABLE _p4_request_ids AS
   SELECT id FROM payment_requests WHERE user_id IN (SELECT id FROM _p4_user_ids);
-CREATE TEMP TABLE _p4_method_ids ON COMMIT DROP AS
+CREATE TEMP TABLE _p4_delivery_ids AS
+  SELECT id FROM practice_deliveries WHERE user_id IN (SELECT id FROM _p4_user_ids);
+CREATE TEMP TABLE _p4_method_ids AS
   SELECT id FROM payment_methods WHERE
     (display_name='STAGING TEST ONLY' AND account_name='TEST ONLY' AND destination='NO REAL DESTINATION'
       AND instructions IN ('Synthetic local test instructions','Synthetic test instructions'));
@@ -188,59 +195,103 @@ SELECT 'PHASE4_PRECOUNT|question_options|' || count(*) FROM question_options WHE
 SELECT 'PHASE4_PRECOUNT|question_import_rows|' || count(*) FROM question_import_rows WHERE question_id IN (SELECT id FROM _p4_question_ids);
 SELECT 'PHASE4_PRECOUNT|mock_attempts|' || count(*) FROM mock_attempts WHERE id IN (SELECT id FROM _p4_attempt_ids);
 SELECT 'PHASE4_PRECOUNT|mock_items|' || count(*) FROM mock_items WHERE attempt_id IN (SELECT id FROM _p4_attempt_ids);
+SELECT 'PHASE4_PRECOUNT|practice_update_receipts|' || count(*) FROM practice_update_receipts WHERE user_id IN (SELECT id FROM _p4_user_ids);
+SELECT 'PHASE4_PRECOUNT|practice_sessions|' || count(*) FROM practice_sessions WHERE user_id IN (SELECT id FROM _p4_user_ids);
+SELECT 'PHASE4_PRECOUNT|practice_usage|' || count(*) FROM practice_usage WHERE user_id IN (SELECT id FROM _p4_user_ids);
+SELECT 'PHASE4_PRECOUNT|practice_deliveries|' || count(*) FROM practice_deliveries WHERE id IN (SELECT id FROM _p4_delivery_ids);
 SELECT 'PHASE4_PRECOUNT|payment_requests|' || count(*) FROM payment_requests WHERE id IN (SELECT id FROM _p4_request_ids);
 SELECT 'PHASE4_PRECOUNT|payment_notifications|' || count(*) FROM payment_notifications WHERE request_id IN (SELECT id FROM _p4_request_ids);
 SELECT 'PHASE4_PRECOUNT|payment_audit_events|' || count(*) FROM payment_audit_events WHERE entity_type='PAYMENT' AND entity_id IN (SELECT id FROM _p4_request_ids);
 SELECT 'PHASE4_PRECOUNT|lifetime_access_grants|' || count(*) FROM lifetime_access_grants WHERE user_id IN (SELECT id FROM _p4_user_ids);
 SELECT 'PHASE4_PRECOUNT|payment_methods_exact_marker|' || count(*) FROM _p4_method_ids;
+SELECT 'PHASE5_FK|'||child.relname||'|'||parent.relname||'|'||con.conname
+  FROM pg_constraint con
+  JOIN pg_class child ON child.oid=con.conrelid
+  JOIN pg_namespace child_ns ON child_ns.oid=child.relnamespace
+  JOIN pg_class parent ON parent.oid=con.confrelid
+  JOIN pg_namespace parent_ns ON parent_ns.oid=parent.relnamespace
+ WHERE con.contype='f' AND child_ns.nspname='public' AND parent_ns.nspname='public'
+   AND (child.relname IN ('bot_users','access_entitlements','practice_deliveries','practice_usage','practice_sessions',
+       'practice_update_receipts','mock_attempts','mock_items','payment_requests','payment_notifications','lifetime_access_grants')
+     OR parent.relname IN ('bot_users','access_entitlements','practice_deliveries','practice_usage','practice_sessions',
+       'practice_update_receipts','mock_attempts','mock_items','payment_requests','payment_notifications','lifetime_access_grants'))
+ ORDER BY parent.relname,child.relname,con.conname;
+-- Remove all children of the known test users before the V18 composite
+-- entitlement foreign keys are reached. Restrict each operation to IDs rooted
+-- in the exact synthetic exam and registration entitlement markers above.
+DELETE FROM practice_update_receipts WHERE user_id IN (SELECT id FROM _p4_user_ids);
+DELETE FROM practice_sessions WHERE user_id IN (SELECT id FROM _p4_user_ids);
+DELETE FROM practice_usage WHERE user_id IN (SELECT id FROM _p4_user_ids);
+UPDATE practice_deliveries SET next_delivery_id=NULL,review_delivery_id=NULL
+  WHERE id IN (SELECT id FROM _p4_delivery_ids);
+DELETE FROM practice_deliveries WHERE id IN (SELECT id FROM _p4_delivery_ids);
+DELETE FROM mock_items WHERE attempt_id IN (SELECT id FROM _p4_attempt_ids);
+DELETE FROM mock_attempts WHERE id IN (SELECT id FROM _p4_attempt_ids);
 DELETE FROM payment_notifications WHERE request_id IN (SELECT id FROM _p4_request_ids);
 DELETE FROM payment_audit_events WHERE entity_type='PAYMENT' AND entity_id IN (SELECT id FROM _p4_request_ids);
 DELETE FROM lifetime_access_grants WHERE user_id IN (SELECT id FROM _p4_user_ids);
 DELETE FROM payment_requests WHERE id IN (SELECT id FROM _p4_request_ids);
-DELETE FROM mock_items WHERE attempt_id IN (SELECT id FROM _p4_attempt_ids);
-DELETE FROM mock_attempts WHERE id IN (SELECT id FROM _p4_attempt_ids);
-DELETE FROM practice_sessions WHERE user_id IN (SELECT id FROM _p4_user_ids);
-DELETE FROM practice_usage WHERE user_id IN (SELECT id FROM _p4_user_ids) AND question_id IN (SELECT id FROM _p4_question_ids);
-UPDATE practice_deliveries SET next_delivery_id=NULL,review_delivery_id=NULL
-  WHERE user_id IN (SELECT id FROM _p4_user_ids) AND question_id IN (SELECT id FROM _p4_question_ids);
-DELETE FROM practice_deliveries WHERE user_id IN (SELECT id FROM _p4_user_ids) AND question_id IN (SELECT id FROM _p4_question_ids);
-DELETE FROM access_entitlements WHERE user_id IN (SELECT id FROM _p4_user_ids);
-DELETE FROM bot_users WHERE id IN (SELECT id FROM _p4_user_ids);
 DELETE FROM payment_methods WHERE id IN (SELECT id FROM _p4_method_ids)
   AND NOT EXISTS (SELECT 1 FROM payment_requests p WHERE p.method_id=payment_methods.id);
+DELETE FROM access_entitlements WHERE user_id IN (SELECT id FROM _p4_user_ids);
+DELETE FROM bot_users WHERE id IN (SELECT id FROM _p4_user_ids);
 DELETE FROM question_import_rows WHERE question_id IN (SELECT id FROM _p4_question_ids);
 UPDATE questions SET current_version_id=NULL,status='DRAFT' WHERE id IN (SELECT id FROM _p4_question_ids);
 DELETE FROM question_options WHERE version_id IN (SELECT id FROM question_versions WHERE question_id IN (SELECT id FROM _p4_question_ids));
 DELETE FROM question_versions WHERE question_id IN (SELECT id FROM _p4_question_ids);
 DELETE FROM questions WHERE id IN (SELECT id FROM _p4_question_ids);
-DELETE FROM categories WHERE exam_type_id IN (SELECT id FROM _p4_exam_ids)
-  AND ((code='mock-a' AND name IN ('Synthetic Category A','Synthetic Mock Category A'))
-    OR (code='mock-b' AND name IN ('Synthetic Category B','Synthetic Mock Category B')));
+DELETE FROM categories WHERE exam_type_id IN (SELECT id FROM _p4_exam_ids);
 DELETE FROM exam_types WHERE id IN (SELECT id FROM _p4_exam_ids);
 DO $$ BEGIN
   IF EXISTS (SELECT 1 FROM exam_types WHERE id IN (SELECT id FROM _p4_exam_ids))
     OR EXISTS (SELECT 1 FROM bot_users WHERE id IN (SELECT id FROM _p4_user_ids))
     OR EXISTS (SELECT 1 FROM access_entitlements WHERE user_id IN (SELECT id FROM _p4_user_ids))
+    OR EXISTS (SELECT 1 FROM practice_update_receipts WHERE user_id IN (SELECT id FROM _p4_user_ids))
+    OR EXISTS (SELECT 1 FROM practice_sessions WHERE user_id IN (SELECT id FROM _p4_user_ids))
+    OR EXISTS (SELECT 1 FROM practice_usage WHERE user_id IN (SELECT id FROM _p4_user_ids))
+    OR EXISTS (SELECT 1 FROM practice_deliveries WHERE id IN (SELECT id FROM _p4_delivery_ids))
+    OR EXISTS (SELECT 1 FROM mock_items WHERE attempt_id IN (SELECT id FROM _p4_attempt_ids))
     OR EXISTS (SELECT 1 FROM questions WHERE id IN (SELECT id FROM _p4_question_ids))
     OR EXISTS (SELECT 1 FROM question_versions WHERE question_id IN (SELECT id FROM _p4_question_ids))
     OR EXISTS (SELECT 1 FROM mock_attempts WHERE id IN (SELECT id FROM _p4_attempt_ids))
+    OR EXISTS (SELECT 1 FROM payment_notifications WHERE request_id IN (SELECT id FROM _p4_request_ids))
+    OR EXISTS (SELECT 1 FROM payment_audit_events WHERE entity_type='PAYMENT' AND entity_id IN (SELECT id FROM _p4_request_ids))
+    OR EXISTS (SELECT 1 FROM lifetime_access_grants WHERE user_id IN (SELECT id FROM _p4_user_ids))
     OR EXISTS (SELECT 1 FROM payment_requests WHERE id IN (SELECT id FROM _p4_request_ids))
     OR EXISTS (SELECT 1 FROM payment_methods WHERE id IN (SELECT id FROM _p4_method_ids))
   THEN RAISE EXCEPTION 'targeted Phase 4 fixture cleanup verification failed'; END IF;
 END $$;
 COMMIT;
 '@
+        if ($cleanupSql -match '(?i)\b(DROP|TRUNCATE|CASCADE)\b') {
+            Stop-Safely 'Cleanup SQL contains a prohibited schema/data removal keyword.'
+        }
+        foreach ($statement in ($cleanupSql -split ';')) {
+            $sqlStatement = [regex]::Replace($statement, '(?m)--[^\r\n]*$', '').Trim()
+            if ($sqlStatement -match '(?is)^DELETE\s+FROM\b') {
+                if ($sqlStatement -notmatch '(?is)\bWHERE\b' -or $sqlStatement -notmatch '(?i)_p4_') {
+                    Stop-Safely 'Cleanup SQL contains a DELETE without an exact Phase 4 fixture scope.'
+                }
+            }
+            if ($sqlStatement -match '(?is)^UPDATE\s+\w+') {
+                $isSettingsRestore = $sqlStatement -match '(?is)^UPDATE\s+app_settings\b' -and $sqlStatement -match '(?is)\bWHERE\s+id\s*=\s*1\b'
+                if ($sqlStatement -notmatch '(?is)\bWHERE\b' -or
+                    ($sqlStatement -notmatch '(?i)_p4_' -and -not $isSettingsRestore)) {
+                    Stop-Safely 'Cleanup SQL contains an UPDATE without an exact fixture or settings-row scope.'
+                }
+            }
+        }
         $cleanupReport = Invoke-LocalPsql $dbName $cleanupSql -Quiet
         foreach ($line in ($cleanupReport -split "`r?`n")) {
-            if ($line -match '^PHASE4_PRECOUNT\|') { Write-Output $line }
+            if ($line -match '^(PHASE4_PRECOUNT|PHASE5_FK)\|') { Write-Output $line }
         }
         $cleanupVerify = @'
-SELECT (SELECT COUNT(*) FROM exam_types WHERE (code='phase4test' AND name='Synthetic Phase 4 Exam') OR (code ~ '^phase4-[0-9a-f]{8}$' AND name='Synthetic Phase 4 Test Exam'))
-+ (SELECT COUNT(*) FROM questions q JOIN question_versions v ON v.question_id=q.id WHERE q.created_by IN ('phase4-test','phase4-local-test') AND v.created_by IN ('phase4-test','phase4-local-test') AND ((v.source_title='Synthetic Phase 4 test' AND v.exam_name='Synthetic Phase 4 Test Exam') OR (v.source_title='Synthetic local integration fixture' AND v.exam_name='Synthetic Phase 4 Exam')))
+SELECT (SELECT COUNT(*) FROM exam_types WHERE (code='phase4test' AND name='Synthetic Phase 4 Exam') OR (code ~ '^phase4-[0-9a-f]{8}$' AND name='Synthetic Phase 4 Test Exam') OR (code ~ '^edge-[0-9a-f]{8}$' AND name='Synthetic Edge Test Exam'))
++ (SELECT COUNT(*) FROM questions q JOIN question_versions v ON v.question_id=q.id WHERE (q.created_by IN ('phase4-test','phase4-local-test') AND v.created_by IN ('phase4-test','phase4-local-test') AND ((v.source_title='Synthetic Phase 4 test' AND v.exam_name='Synthetic Phase 4 Test Exam') OR (v.source_title='Synthetic local integration fixture' AND v.exam_name='Synthetic Phase 4 Exam'))) OR (q.created_by='edge-test' AND v.source_title='Synthetic Edge fixtures' AND v.exam_name='Synthetic Edge Test Exam'))
 + (SELECT COUNT(*) FROM payment_methods WHERE display_name='STAGING TEST ONLY' AND account_name='TEST ONLY' AND destination='NO REAL DESTINATION' AND instructions IN ('Synthetic local test instructions','Synthetic test instructions'));
 '@
         $remainingMarkers = Invoke-LocalPsql $dbName $cleanupVerify -Quiet
-        if ([int]$remainingMarkers -ne 0) { Stop-Safely 'Known Phase 4 synthetic markers remain after targeted cleanup; refusing to continue.' }
+        if ([int]$remainingMarkers -ne 0) { Stop-Safely 'Known integration synthetic markers remain after targeted cleanup; refusing to continue.' }
         $emptyCheck = @'
 DO $$ DECLARE t record; n bigint; BEGIN
   FOR t IN SELECT tablename FROM pg_tables WHERE schemaname='public' AND tablename NOT IN ('flyway_schema_history','app_settings') LOOP
@@ -272,7 +323,7 @@ END $$;
     [Environment]::SetEnvironmentVariable('PGPASSWORD', $null, 'Process')
 
     $failureStage = 'Spring Boot PostgreSQL integration tests and Flyway migrations'
-    Write-Output 'Running Spring Boot Phase 4 PostgreSQL integration test; Spring Boot Flyway applies the repository SQL and Java migrations.'
+    Write-Output 'Running Spring Boot Phase 5 PostgreSQL integration test; Spring Boot Flyway applies the repository SQL and Java migrations.'
     Push-Location $root
     try {
         $mavenStartedAt = [DateTime]::UtcNow
@@ -332,7 +383,7 @@ END $$;
             Write-Output "ERROR: Maven process failed with exit code $mvnExitCode."
             foreach ($line in @($mavenStdout | Select-Object -Last 25)) { Write-Output "MAVEN OUTPUT: $(Protect-ProcessText $line)" }
             foreach ($line in @($mavenStderr | Select-Object -Last 25)) { Write-Output "MAVEN STDERR: $(Protect-ProcessText $line)" }
-            Stop-Safely 'Spring Boot Phase 4 PostgreSQL test or Flyway migration failed; see sanitized Maven/Surefire context above.'
+            Stop-Safely 'Spring Boot Phase 5 PostgreSQL test or Flyway migration failed; see sanitized Maven/Surefire context above.'
         }
         if ($surefireTests -lt 1 -or $surefireFailures -gt 0 -or $surefireErrors -gt 0) {
             Stop-Safely 'Maven exited successfully but the fresh Phase 4 Surefire report is absent or contains failed tests.'
@@ -355,7 +406,7 @@ END $$;
             # a terminating error when the global preference is Stop. Capture
             # both streams without letting progress text preempt exit checking.
             $ErrorActionPreference = 'Continue'
-            $denoOutput = @(& $denoCommand.Source test --allow-env=EDGE_TEST_DATABASE_URL --allow-net=127.0.0.1,localhost $testFile 2>&1)
+        $denoOutput = @(& $denoCommand.Source test --allow-env=EDGE_TEST_DATABASE_URL --allow-net=127.0.0.1,localhost $testFile $practiceTestFile 2>&1)
             $denoExitCode = $LASTEXITCODE
         } finally {
             $ErrorActionPreference = $denoPreviousErrorPreference
@@ -397,8 +448,8 @@ END $$;
     } finally { Pop-Location }
     $failureStage = 'Flyway final-version and synthetic-fixture cleanup verification'
     $latest = Invoke-LocalPsql $dbName "SELECT COALESCE(MAX(version::int),0) FROM flyway_schema_history WHERE success;" -Quiet
-    if ($latest -ne '17') { Stop-Safely 'Flyway did not finish at V17.' }
-    $left = Invoke-LocalPsql $dbName "SELECT (SELECT COUNT(*) FROM bot_users)+(SELECT COUNT(*) FROM questions)+(SELECT COUNT(*) FROM payment_requests)+(SELECT COUNT(*) FROM mock_attempts)+(SELECT COUNT(*) FROM payment_methods)+(SELECT COUNT(*) FROM access_entitlements);" -Quiet
+    if ($latest -ne '19') { Stop-Safely 'Flyway did not finish at V19.' }
+    $left = Invoke-LocalPsql $dbName "SELECT (SELECT COUNT(*) FROM exam_types)+(SELECT COUNT(*) FROM categories)+(SELECT COUNT(*) FROM bot_users)+(SELECT COUNT(*) FROM questions)+(SELECT COUNT(*) FROM payment_requests)+(SELECT COUNT(*) FROM mock_attempts)+(SELECT COUNT(*) FROM payment_methods)+(SELECT COUNT(*) FROM access_entitlements)+(SELECT COUNT(*) FROM practice_deliveries)+(SELECT COUNT(*) FROM practice_usage)+(SELECT COUNT(*) FROM practice_sessions)+(SELECT COUNT(*) FROM practice_update_receipts);" -Quiet
     if ([int]$left -ne 0) { Stop-Safely 'Synthetic fixture cleanup check found remaining test rows; database is preserved for inspection.' }
     $testsPassed = $true
 } catch {
@@ -417,17 +468,17 @@ END $$;
 }
 
 if (-not $testsPassed) {
-    Write-Output 'PHASE 4 LOCAL POSTGRES INTEGRATION: BLOCKED / FAIL'
+Write-Output 'PHASE 5 LOCAL POSTGRES INTEGRATION: BLOCKED / FAIL'
     Write-Output '- target: local 127.0.0.1 only'
-    Write-Output '- database: airline_exam_bot_phase4_test (preserved; no DROP, TRUNCATE, or Flyway clean)'
+    Write-Output '- database: airline_exam_bot_phase5_test (preserved; no DROP, TRUNCATE, or Flyway clean)'
     Write-Output "- stage: $failureStage"
     Write-Output "- line: $failureLine"
     [Console]::Error.WriteLine($failure)
     exit 1
 }
-Write-Output 'PHASE 4 LOCAL POSTGRES INTEGRATION: PASS'
-Write-Output 'POSTGRES: PostgreSQL 18 local loopback; dedicated airline_exam_bot_phase4_test; synthetic fixtures cleaned.'
-Write-Output 'FLYWAY: V1–V17 applied by Spring Boot; SQL and Java migrations included; final version 17.'
-Write-Output 'MOCK TESTS: creation, first answer charge, duplicate callback, resume, timer, frozen versions, scoring, zero-answer expiry PASS.'
-Write-Output 'PAYMENT TESTS: request creation, duplicate reference, duplicate update, approval idempotency, rejection, entitlement visibility PASS.'
+Write-Output 'PHASE 5 LOCAL POSTGRES INTEGRATION: PASS'
+Write-Output 'POSTGRES: PostgreSQL 18 local loopback; dedicated airline_exam_bot_phase5_test; synthetic fixtures cleaned.'
+Write-Output 'FLYWAY: V1–V19 applied by Spring Boot; SQL and Java migrations included; final version 19.'
+Write-Output 'PHASE 4 MOCK TESTS: creation, first answer charge, duplicate callback, resume, timer, frozen versions, scoring, zero-answer expiry PASS.'
+Write-Output 'PHASE 4 PAYMENT TESTS: request creation, duplicate reference, duplicate update, approval idempotency, rejection, entitlement visibility PASS.'
 Write-Output 'No staging or production database was contacted.'

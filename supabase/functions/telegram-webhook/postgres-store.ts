@@ -25,9 +25,9 @@ type GrantRow = {
 };
 
 export type RegistrationView = {
-  status: "LANGUAGE_REQUIRED" | "EXAM_TYPE_REQUIRED" | "PHONE_REQUIRED" | "COMPLETED";
+  status: "LANGUAGE_REQUIRED" | "EXAM_TYPE_REQUIRED" | "PHONE_REQUIRED" | "EXAM_SWITCH_REQUIRED" | "COMPLETED";
   language: "en" | "am";
-  exams?: Array<{ id: string; name: string; nameAm: string }>;
+  exams?: Array<{ id: string; name: string; nameAm: string; current?: boolean }>;
   errorKey?: string | null;
   grant?: {
     accessLevel: string;
@@ -37,7 +37,11 @@ export type RegistrationView = {
     practiceUsed: number;
     mocksUsed: number;
     activeMockId?: string | null;
+    examName?: string;
+    examNameAm?: string;
   };
+  examName?: string;
+  examNameAm?: string;
 };
 
 function stringId(value: string | bigint | null): string | null {
@@ -89,18 +93,20 @@ export class PostgresRegistrationStore {
     const language = user.preferred_language === "am" ? "am" : "en";
     let exams: RegistrationView["exams"] = [];
     let grant: RegistrationView["grant"];
-    if (status === "EXAM_TYPE_REQUIRED") {
+    if (status === "EXAM_TYPE_REQUIRED" || status === "EXAM_SWITCH_REQUIRED") {
       const result = await client.queryObject<ExamRow>`
         SELECT id, name, name_am FROM exam_types WHERE active = TRUE ORDER BY display_order, id
       `;
-      exams = result.rows.map((exam) => ({ id: String(exam.id), name: exam.name, nameAm: exam.name_am ?? "" }));
+      exams = result.rows.map((exam) => ({ id: String(exam.id), name: exam.name, nameAm: exam.name_am ?? "",
+        current: String(exam.id) === selectedExamId }));
     } else if (status === "COMPLETED") {
       const result = await client.queryObject<GrantRow>`
         SELECT access_level, practice_limit, mock_limit, questions_per_mock, practice_used, mocks_used
-        FROM access_entitlements WHERE user_id = ${String(user.id)}
+        FROM access_entitlements WHERE user_id = ${String(user.id)} AND exam_type_id = ${selectedExamId}
       `;
       const found = result.rows[0];
       if (!found) throw new Error("COMPLETED_USER_WITHOUT_ENTITLEMENT");
+      const selected = await client.queryObject<ExamRow>`SELECT id,name,name_am FROM exam_types WHERE id=${selectedExamId}`;
       grant = {
         accessLevel: found.access_level,
         practiceLimit: found.practice_limit,
@@ -108,13 +114,16 @@ export class PostgresRegistrationStore {
         questionsPerMock: found.questions_per_mock,
         practiceUsed: found.practice_used,
         mocksUsed: found.mocks_used,
+        examName: selected.rows[0]?.name ?? "",
+        examNameAm: selected.rows[0]?.name_am ?? "",
       };
       const activeMock = await client.queryObject<{ id: string | bigint }>`
-        SELECT id FROM mock_attempts WHERE active_user_id = ${String(user.id)}
+        SELECT id FROM mock_attempts WHERE active_user_id = ${String(user.id)} AND exam_type_id=${selectedExamId}
       `;
       grant.activeMockId = activeMock.rows[0] ? String(activeMock.rows[0].id) : null;
     }
-    return { status, language, exams, errorKey, grant };
+    return { status, language, exams, errorKey, grant,
+      examName: grant?.examName, examNameAm: grant?.examNameAm };
   }
 
   async start(telegramId: string): Promise<RegistrationView> {
@@ -148,14 +157,39 @@ export class PostgresRegistrationStore {
   async exam(telegramId: string, examId: string): Promise<RegistrationView> {
     return this.transaction(async (client) => {
       const user = await this.findUser(client, telegramId);
-      if (!user || user.registration_status !== "EXAM_TYPE_REQUIRED") return this.loadView(client, user);
+      if (!user || !["EXAM_TYPE_REQUIRED", "COMPLETED"].includes(user.registration_status)) return this.loadView(client, user);
       const exam = await this.activeExam(client, examId);
       if (!exam) return this.loadView(client, user, "registration.examUnavailable");
+      if (user.registration_status === "COMPLETED") {
+        const settings = (await client.queryObject<SettingsRow>`SELECT * FROM app_settings WHERE id=1 FOR UPDATE`).rows[0];
+        await client.queryArray`
+          INSERT INTO access_entitlements(user_id,exam_type_id,phone_identity_hash,access_level,practice_limit,mock_limit,
+            questions_per_mock,practice_used,mocks_used,grant_source,granted_at,created_at,updated_at)
+          VALUES (${String(user.id)},${examId},(SELECT phone_identity_hash FROM bot_users WHERE id=${String(user.id)}),
+            'FREE',${settings.free_practice_limit},${settings.free_mock_limit},${settings.questions_per_mock},0,0,
+            'EXAM_ACTIVATION',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP,CURRENT_TIMESTAMP)
+          ON CONFLICT (user_id,exam_type_id) DO NOTHING
+        `;
+        await client.queryArray`UPDATE bot_users SET selected_exam_type_id=${examId},updated_at=CURRENT_TIMESTAMP WHERE id=${String(user.id)}`;
+        return this.loadView(client, { ...user, selected_exam_type_id: examId });
+      }
       await client.queryArray`
         UPDATE bot_users SET selected_exam_type_id = ${examId}, registration_status = 'PHONE_REQUIRED', updated_at = CURRENT_TIMESTAMP
         WHERE id = ${String(user.id)}
       `;
       return this.loadView(client, { ...user, selected_exam_type_id: examId, registration_status: "PHONE_REQUIRED" });
+    });
+  }
+
+  async switchExams(telegramId: string): Promise<RegistrationView> {
+    return this.transaction(async (client) => {
+      const user = await this.findUser(client, telegramId);
+      if (!user || user.registration_status !== "COMPLETED") return this.loadView(client, user);
+      const view = await this.loadView(client, user);
+      const exams = await client.queryObject<ExamRow>`SELECT id,name,name_am FROM exam_types WHERE active=TRUE ORDER BY display_order,id`;
+      return { ...view, status: "EXAM_SWITCH_REQUIRED", exams: exams.rows.map((exam) => ({
+        id:String(exam.id),name:exam.name,nameAm:exam.name_am??"",current:String(exam.id)===String(user.selected_exam_type_id),
+      })) };
     });
   }
 
@@ -173,12 +207,20 @@ export class PostgresRegistrationStore {
   }
 
   async contact(telegramId: string, contactOwner: string | null, rawPhone: string | null): Promise<RegistrationView> {
+    if (contactOwner === null || contactOwner !== telegramId) {
+      return await this.database.transaction(async (client) => this.loadView(client, await this.findUser(client, telegramId), "registration.ownContact"));
+    }
+    return await this.savePhone(telegramId, rawPhone, true);
+  }
+
+  async manualPhone(telegramId: string, rawPhone: string): Promise<RegistrationView> {
+    return await this.savePhone(telegramId, rawPhone, false);
+  }
+
+  private async savePhone(telegramId: string, rawPhone: string | null, verifiedContact: boolean): Promise<RegistrationView> {
     return this.transaction(async (client, settings) => {
       const user = await this.findUser(client, telegramId);
-      if (contactOwner === null || contactOwner !== telegramId) {
-        return this.loadView(client, user, "registration.ownContact");
-      }
-      if (!user || user.registration_status !== "PHONE_REQUIRED") return this.loadView(client, user);
+      if (!user || (user.registration_status !== "PHONE_REQUIRED" && !(verifiedContact && user.registration_status === "COMPLETED"))) return this.loadView(client, user);
 
       let phoneKey: Uint8Array;
       let fingerprint: string;
@@ -211,21 +253,28 @@ export class PostgresRegistrationStore {
       const existing = await client.queryObject<{ id: string | bigint }>`
         SELECT id FROM bot_users WHERE phone_identity_hash = ${identityHash}
       `;
-      if (existing.rows.length) return this.loadView(client, user, "registration.duplicatePhone");
+      if (existing.rows.some((row) => String(row.id) !== String(user.id))) return this.loadView(client, user, "registration.duplicatePhone");
+      if (user.registration_status === "COMPLETED") {
+        const own = await client.queryObject<{phone_identity_hash:string|null}>`SELECT phone_identity_hash FROM bot_users WHERE id=${String(user.id)}`;
+        if (own.rows[0]?.phone_identity_hash !== identityHash) return this.loadView(client, user, "registration.duplicatePhone");
+        await client.queryArray`UPDATE bot_users SET phone_e164=${canonicalPhone},phone_verification_status='VERIFIED_TELEGRAM_CONTACT',updated_at=CURRENT_TIMESTAMP WHERE id=${String(user.id)}`;
+        return this.loadView(client, user);
+      }
 
       await client.queryArray`
         UPDATE app_settings SET phone_key_fingerprint = ${fingerprint}, updated_at = CURRENT_TIMESTAMP WHERE id = 1
       `;
       await client.queryArray`
-        UPDATE bot_users SET phone_identity_hash = ${identityHash}, registration_completed_at = CURRENT_TIMESTAMP,
+        UPDATE bot_users SET phone_identity_hash = ${identityHash}, phone_e164=${canonicalPhone},
+          phone_verification_status=${verifiedContact ? "VERIFIED_TELEGRAM_CONTACT" : "UNVERIFIED_TYPED"}, registration_completed_at = CURRENT_TIMESTAMP,
           registration_status = 'COMPLETED', updated_at = CURRENT_TIMESTAMP WHERE id = ${String(user.id)}
       `;
       await client.queryArray`
         INSERT INTO access_entitlements (
-          user_id, phone_identity_hash, access_level, practice_limit, mock_limit, questions_per_mock,
+          user_id, exam_type_id, phone_identity_hash, access_level, practice_limit, mock_limit, questions_per_mock,
           practice_used, mocks_used, grant_source, granted_at, created_at, updated_at
         ) VALUES (
-          ${String(user.id)}, ${identityHash}, 'FREE', ${settings.free_practice_limit}, ${settings.free_mock_limit},
+          ${String(user.id)}, ${selectedExam}, ${identityHash}, 'FREE', ${settings.free_practice_limit}, ${settings.free_mock_limit},
           ${settings.questions_per_mock}, 0, 0, 'REGISTRATION', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
         )
       `;

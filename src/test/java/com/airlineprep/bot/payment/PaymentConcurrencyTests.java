@@ -22,7 +22,7 @@ class PaymentConcurrencyTests extends PaymentFixture {
  }
  String outcome(Runnable action) {try {action.run();return "OK";} catch(com.airlineprep.bot.common.ExamException e) {return e.key();}}
  @Test void simultaneousCreationHasOneOpenRequest() throws Exception {
-  var ids=race(()->payments.start(sender,"a").request().id(),()->payments.start(sender,"b").request().id());
+  var ids=race(()->payments.start(sender,exam,"a").request().id(),()->payments.start(sender,exam,"b").request().id());
   assertThat(ids.getFirst()).isEqualTo(ids.getLast());
  }
  @Test void duplicateReferencesAcrossUsersHaveOneWinner() throws Exception {

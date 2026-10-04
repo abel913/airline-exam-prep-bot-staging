@@ -30,7 +30,7 @@ class WebhookReplayTests extends PaymentFixture {
         setupPayment();content(2);
         var presenter=new StudentPresenter(client,messages);
         var handler=new TelegramUpdateHandler(client,registration,new RegistrationPresenter(client,messages),
-                new StudentFlow(practice,mocks,progress,presenter,settings),new PaymentFlow(payments,presenter));
+                new StudentFlow(practice,mocks,progress,presenter,settings),new PaymentFlow(payments,presenter,registration));
         controller=new TelegramWebhookController(new TelegramBotProperties(true,"123:fictional",TelegramBotProperties.Mode.WEBHOOK,"fictional-test"),client,handler,mapper);
     }
     void post(Map<String,Object> update,int status) throws Exception {
@@ -51,7 +51,8 @@ class WebhookReplayTests extends PaymentFixture {
         long attempt=mocks.prepare(sender,"webhook-mock").attempt().id();mocks.open(sender,attempt,0,false);
         var mockAnswer=callback("m:a:"+attempt+":0:0:0");post(mockAnswer,200);post(mockAnswer,200);
         assertThat(grant().getMocksUsed()).isEqualTo(1);
-        var start=callback("pay:start:webhook-payment");post(start,200);post(start,200);
+        post(callback("pay:open"),200);
+        var start=callback("pay:exam:"+exam);post(start,200);post(start,200);
         long payment=payments.status(sender).request().id();
         assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM payment_requests WHERE user_id=?",Integer.class,grant().getUserId())).isEqualTo(1);
         payments.select(sender,payment,method);payments.reference(sender,payment,"FICTIONAL-WEBHOOK-"+sender);

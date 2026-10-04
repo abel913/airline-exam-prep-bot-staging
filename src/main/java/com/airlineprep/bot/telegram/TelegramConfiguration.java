@@ -47,7 +47,7 @@ public class TelegramConfiguration {
                 com.airlineprep.bot.practice.StudentInsights insights) {
             var students=new StudentFlow(practice,mocks,progress,new StudentPresenter(client,messages),settings).withInsights(insights);
             return new TelegramUpdateHandler(client, registration, new RegistrationPresenter(client, messages),students,
-                new PaymentFlow(payments,new StudentPresenter(client,messages)));
+                new PaymentFlow(payments,new StudentPresenter(client,messages),registration));
         }
 
         @Bean

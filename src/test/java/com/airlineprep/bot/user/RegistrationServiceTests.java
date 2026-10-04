@@ -97,8 +97,34 @@ class RegistrationServiceTests extends IsolatedDatabaseSupport {
         var user=users.findByTelegramUserId(sender).orElseThrow();
         assertThat(user.getPhoneIdentityHash()).isNull();
         assertThat(entitlements.findByUserId(user.getId())).isEmpty();
-        registration.contact(sender,sender,"0912345678");
+        registration.manualPhone(sender,"0912345678");
         assertThat(registration.manualPhoneInput(sender)).isEmpty();
+    }
+    @Test void typedPhoneIsUnverifiedAndMatchingOwnContactUpgradesIt() {
+        phoneStep(sender);
+        assertThat(registration.manualPhone(sender,"0 912 345 678").status()).isEqualTo(RegistrationStatus.COMPLETED);
+        var user=users.findByTelegramUserId(sender).orElseThrow();
+        var entitlement=entitlements.findByUserIdAndExamTypeId(user.getId(),active.getId()).orElseThrow();
+        assertThat(user.getPhoneE164()).isEqualTo("+251912345678");
+        assertThat(user.getPhoneVerificationStatus()).isEqualTo("UNVERIFIED_TYPED");
+        registration.contact(sender,sender,"+251912345678");
+        assertThat(users.findByTelegramUserId(sender).orElseThrow().getPhoneVerificationStatus()).isEqualTo("VERIFIED_TELEGRAM_CONTACT");
+        assertThat(entitlements.findByUserIdAndExamTypeId(user.getId(),active.getId()).orElseThrow().getId()).isEqualTo(entitlement.getId());
+    }
+    @Test void activatingAndSwitchingExamCreatesIndependentEntitlementOnce() {
+        phoneStep(sender); registration.manualPhone(sender,"0912345678");
+        long userId=users.findByTelegramUserId(sender).orElseThrow().getId();
+        ExamType other=new ExamType();other.setCode("other-"+sender);other.setName("Cabin Crew");other.setNameAm("");other.setActive(true);exams.saveAndFlush(other);
+        assertThat(registration.switchExams(sender).status()).isEqualTo(RegistrationStatus.EXAM_SWITCH_REQUIRED);
+        assertThat(registration.switchExams(sender).exams()).anyMatch(e -> e.id().equals(active.getId())&&e.current());
+        registration.exam(sender,other.getId());
+        var cabin=entitlements.findByUserIdAndExamTypeId(userId,other.getId()).orElseThrow();
+        assertThat(cabin.getPracticeLimit()).isEqualTo(100);
+        assertThat(registration.start(sender).status()).isEqualTo(RegistrationStatus.COMPLETED);
+        registration.exam(sender,active.getId());
+        assertThat(entitlements.findAllByUserIdOrderByExamTypeId(userId)).hasSize(2);
+        assertThat(entitlements.findByUserIdAndExamTypeId(userId,active.getId())).isPresent();
+        assertThat(entitlements.findByUserIdAndExamTypeId(userId,other.getId()).orElseThrow().getId()).isEqualTo(cabin.getId());
     }
     @Test void missingAndForeignContactOwnershipNeverCompletes() {
         phoneStep(sender);

@@ -36,7 +36,7 @@ class RestartPersistenceTests {
    var mocks=app.getBean(MockAttemptService.class);attempt=mocks.prepare(700002,"restart").attempt().id();deadline=mocks.open(700002,attempt,0,false).attempt().deadline();mocks.answer(700002,attempt,0,0,0);
    long method=app.getBean(PaymentMethodService.class).save(null,new PaymentMethodService.Form("BANK_TRANSFER","Fictional","Test","NOT-REAL","No money",true,0,null),"test-admin");
    var service=app.getBean(PaymentService.class);
-   for(int i=0;i<4;i++) {long sender=700002+i;long id=service.start(sender,"restart").request().id();payments[i]=id;service.select(sender,id,method);if(i>0)service.reference(sender,id,"DEVTEST-RESTART-"+i);if(i>1)service.receipt(sender,id,new ReceiptMetadata("fictional","unique_"+i,"PHOTO",null,"image/jpeg",100));if(i==3)app.getBean(PaymentReviewService.class).approve(id,"test-admin");}
+   for(int i=0;i<4;i++) {long sender=700002+i;long id=service.start(sender,exam,"restart").request().id();payments[i]=id;service.select(sender,id,method);if(i>0)service.reference(sender,id,"DEVTEST-RESTART-"+i);if(i>1)service.receipt(sender,id,new ReceiptMetadata("fictional","unique_"+i,"PHOTO",null,"image/jpeg",100));if(i==3)app.getBean(PaymentReviewService.class).approve(id,"test-admin");}
    settings.maintenance(true,"test-admin");
   }
   try(var app=open(database)) {

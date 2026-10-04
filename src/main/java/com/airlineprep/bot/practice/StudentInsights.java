@@ -55,11 +55,11 @@ public class StudentInsights {
     JOIN categories c ON c.id=cv.category_id JOIN exam_types e ON e.id=cv.exam_type_id
     WHERE q.status='PUBLISHED' AND c.active=true AND e.active=true AND cv.category_id=v.category_id
      AND cv.exam_type_id=? AND (cv.free_pool=true OR (?=true AND cv.premium_pool=true))
-     AND NOT EXISTS (SELECT 1 FROM practice_usage used WHERE used.user_id=? AND used.question_id=q.id))
+     AND NOT EXISTS (SELECT 1 FROM practice_usage used WHERE used.user_id=? AND used.exam_type_id=? AND used.question_id=q.id))
    GROUP BY v.category_id HAVING COUNT(*)>=5 AND SUM(CASE WHEN o.correct THEN 1 ELSE 0 END)*100.0/COUNT(*)<60
    ORDER BY COALESCE((SELECT MAX(recent.id) FROM practice_deliveries recent JOIN question_versions rv ON rv.id=recent.version_id
-    WHERE recent.user_id=? AND rv.category_id=v.category_id),0),v.category_id LIMIT 1
-   """,(r,n)->r.getLong(1),s.id(),s.examId(),s.examId(),s.lifetime(),s.id(),s.id());
+    WHERE recent.user_id=? AND recent.exam_type_id=? AND rv.category_id=v.category_id),0),v.category_id LIMIT 1
+   """,(r,n)->r.getLong(1),s.id(),s.examId(),s.examId(),s.lifetime(),s.id(),s.examId(),s.id(),s.examId());
   return rows.isEmpty()?null:rows.getFirst();
  }
  @Transactional(readOnly=true)

@@ -1,0 +1,8 @@
+<!doctype html><html lang="en" xmlns:th="http://www.thymeleaf.org">
+<head th:replace="~{admin/fragments :: head('Registered Users')}"></head><body><header th:replace="~{admin/fragments :: header}"></header>
+<div class="shell"><nav th:replace="~{admin/fragments :: nav}"></nav><main><h1>Registered Users</h1>
+<section class="panel"><table><thead><tr><th>User</th><th>Telegram identity</th><th>Contact</th><th>Verification</th><th>Current exam</th><th>Exams</th><th>Registered</th></tr></thead><tbody>
+<tr th:each="u : ${users}"><td><a th:href="@{/admin/users/{id}(id=${u.id})}" th:text="${u.id}"></a></td><td th:text="${u.telegramId}"></td>
+<td th:text="${u.phone == null ? 'Not captured before Phase 5' : u.phone}"></td><td th:text="${u.verification}"></td><td th:text="${u.currentExam}"></td><td th:text="${u.examCount}"></td><td th:text="${u.registered}"></td></tr>
+</tbody></table><p class="empty" th:if="${users.isEmpty()}">No registered users.</p></section>
+</main></div></body></html>

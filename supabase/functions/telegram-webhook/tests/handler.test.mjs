@@ -18,6 +18,10 @@ function fakeStore() {
     async language(id, language) { calls.push(["language", id, language]); return { status: "EXAM_TYPE_REQUIRED", language, exams: [{ id: "1", name: "Staging Test Exam", nameAm: "" }] }; },
     async exam(id, examId) { calls.push(["exam", id, examId]); return { status: "PHONE_REQUIRED", language: "en" }; },
     async manualPhoneInput(id) { calls.push(["manual", id]); return { status: "PHONE_REQUIRED", language: "en", errorKey: "registration.manualPhone" }; },
+    async manualPhone(id, phone) {
+      calls.push(["manualPhone", id, phone]);
+      return { status: "COMPLETED", language: "en", grant: { accessLevel: "FREE", practiceLimit: 100, mockLimit: 2, questionsPerMock: 50, practiceUsed: 0, mocksUsed: 0 } };
+    },
     async contact(id, owner, phone) {
       calls.push(["contact", id, owner, phone]);
       if (owner !== id) return { status: "PHONE_REQUIRED", language: "en", errorKey: "registration.ownContact" };
@@ -102,13 +106,13 @@ test("language and exam callbacks preserve callback IDs and show contact-share r
   assert.equal(telegram.calls.at(-1)[3].one_time_keyboard, false);
 });
 
-test("typed phone is rejected and another account's contact does not register", async () => {
+test("typed phone is passed to registration and another account's contact does not register", async () => {
   const store = fakeStore();
   const telegram = fakeTelegram();
   const handler = createTelegramWebhookHandler({ env, store, telegram });
-  assert.equal((await handler(makeRequest(privateMessage("12345")))).status, 200);
-  assert.match(telegram.calls[0][2], /Please don't type your phone number/);
-  assert.equal(telegram.calls[0][3].keyboard[0][0].request_contact, true);
+  assert.equal((await handler(makeRequest(privateMessage("+251912345678")))).status, 200);
+  assert.deepEqual(store.calls.slice(0, 2), [["manual", "77"], ["manualPhone", "77", "+251912345678"]]);
+  assert.match(telegram.calls[0][2], /Welcome back/);
 
   const contactUpdate = {
     update_id: 12,
@@ -120,10 +124,12 @@ test("typed phone is rejected and another account's contact does not register", 
   assert.equal(telegram.calls.at(-1)[3].keyboard[0][0].request_contact, true);
 });
 
-test("own Telegram contact completes once and deferred mock actions get a scope notice", async () => {
+test("own Telegram contact completes once and mock actions route to the mock flow", async () => {
   const store = fakeStore();
   const telegram = fakeTelegram();
-  const handler = createTelegramWebhookHandler({ env, store, telegram });
+  const mockCalls = [];
+  const mock = { async callback(...args) { mockCalls.push(args); } };
+  const handler = createTelegramWebhookHandler({ env, store, mock, telegram });
   const update = {
     update_id: 13,
     message: { from: { id: 77 }, chat: { id: 77, type: "private" }, contact: { user_id: 77, phone_number: "0912345678" } },
@@ -134,9 +140,9 @@ test("own Telegram contact completes once and deferred mock actions get a scope 
   assert.match(telegram.calls[1][2], /Welcome back/);
   assert.equal(telegram.calls[1][3].inline_keyboard[0][0].callback_data, "p:menu");
 
-  const unsupported = { update_id: 14, callback_query: { id: "callback-3", data: "m:intro", from: { id: 77 }, message: { chat: { id: 77, type: "private" } } } };
-  assert.equal((await handler(makeRequest(unsupported))).status, 200);
-  assert.match(telegram.calls.at(-1)[2], /Mock exams and payments are not available/);
+  const mockUpdate = { update_id: 14, callback_query: { id: "callback-3", data: "m:intro", from: { id: 77 }, message: { chat: { id: 77, type: "private" } } } };
+  assert.equal((await handler(makeRequest(mockUpdate))).status, 200);
+  assert.deepEqual(mockCalls, [["77", "77", "m:intro", "14"]]);
   assert.equal(store.calls.filter((call) => call[0] === "contact").length, 1);
 });
 

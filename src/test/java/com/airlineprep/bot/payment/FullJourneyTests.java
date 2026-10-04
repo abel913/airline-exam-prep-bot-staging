@@ -2,6 +2,7 @@ package com.airlineprep.bot.payment;
 import java.util.*;
 import java.util.concurrent.atomic.AtomicLong;
 import com.airlineprep.bot.telegram.*;
+import com.airlineprep.bot.admin.CatalogForm;
 import com.airlineprep.bot.practice.*;
 import com.airlineprep.bot.mock.*;
 import com.airlineprep.bot.settings.*;
@@ -35,7 +36,7 @@ class FullJourneyTests extends PaymentFixture {
   settings.update(new SettingsForm(1,1,2,f.lifetimePrice(),f.currency(),true,true,"Fictional support",null),"test-admin");
   sender=SENDERS.incrementAndGet();
   doAnswer(call->{texts.add(call.getArgument(1));Map<?,?> markup=call.getArgument(2);if(markup.get("inline_keyboard") instanceof List<?> rows)for(Object row:rows)for(Object b:(List<?>)row)buttons.add((String)((Map<?,?>)b).get("callback_data"));return null;}).when(client).sendMessage(anyLong(),anyString(),anyMap());
-  var ui=new StudentPresenter(client,messages);handler=new TelegramUpdateHandler(client,registration,new RegistrationPresenter(client,messages),new StudentFlow(practice,mocks,progress,ui,settings),new PaymentFlow(payments,ui));
+  var ui=new StudentPresenter(client,messages);handler=new TelegramUpdateHandler(client,registration,new RegistrationPresenter(client,messages),new StudentFlow(practice,mocks,progress,ui,settings),new PaymentFlow(payments,ui,registration));
  }
  void message(Map<String,Object> fields) throws Exception {var body=new HashMap<>(fields);body.put("from",Map.of("id",sender));body.put("chat",Map.of("id",sender,"type","private"));texts.clear();buttons.clear();handler.handle(json.valueToTree(Map.of("message",body)),"TestBot");}
  void click(String data) throws Exception {texts.clear();buttons.clear();handler.handle(json.valueToTree(Map.of("callback_query",Map.of("id","cb","data",data,"from",Map.of("id",sender),"message",Map.of("chat",Map.of("id",sender,"type","private"))))),"TestBot");}
@@ -43,7 +44,7 @@ class FullJourneyTests extends PaymentFixture {
  String phone(){return "09"+String.format("%08d",sender);}
  void onboard(String language,String phone) throws Exception {message(Map.of("text","/start"));click("lang:"+language);click("exam:"+exam);message(Map.of("contact",Map.of("user_id",sender,"phone_number",phone)));}
  long submitPayment(String reference) throws Exception {
-  click("pay:open");click(button("pay:start:"));click(button("pay:method:"));message(Map.of("text",reference));
+  click("pay:open");click(button("pay:exam:"));click(button("pay:method:"));message(Map.of("text",reference));
   var receipt=Map.<String,Object>of("photo",List.of(Map.of("file_id","test_file","file_unique_id","test_unique_"+sender,"file_size",100,"width",10,"height",10)));
   message(receipt);long id=payments.status(sender).request().id();message(receipt);assertThat(queries.get(id).status()).isEqualTo(PaymentStatus.PENDING_REVIEW);return id;
  }
@@ -69,11 +70,52 @@ class FullJourneyTests extends PaymentFixture {
   assertThat(String.join("",texts)).doesNotContain(Long.toString(first),shared);
   message(Map.of("contact",Map.of("user_id",sender,"phone_number",phone())));assertThat(grant().getPracticeUsed()).isZero();assertThat(grant().getAccessLevel()).isEqualTo("FREE");
  }
+ @Test void multiExamUsageAndLifetimePurchasesRemainExamScoped() throws Exception {
+  onboard("en",phone());
+  long examA=exam;
+  long userId=users.findByTelegramUserId(sender).orElseThrow().getId();
+  var practiceA=practice.next(sender,null,null,false);practice.answer(sender,practiceA.delivery().id(),0);
+  var mockA=mocks.prepare(sender,"phase5-exam-a");mocks.open(sender,mockA.attempt().id(),0,false);
+  mocks.answer(sender,mockA.attempt().id(),0,0,0);
+  mocks.submit(sender,mockA.attempt().id());
+
+  long examB=catalog.save(false,null,new CatalogForm("phase5-cabin-"+sender,"Synthetic Cabin Crew","",true,1,null),"test-admin");
+  long categoryB=catalog.save(true,null,new CatalogForm("phase5-category-"+sender,"Synthetic Cabin Category","",true,1,examB),"test-admin");
+  exam=examB;category=categoryB;content(3);
+  registration.exam(sender,examB);
+  var practiceB=practice.next(sender,null,null,false);practice.answer(sender,practiceB.delivery().id(),0);
+  var mockB=mocks.prepare(sender,"phase5-exam-b");mocks.open(sender,mockB.attempt().id(),0,false);
+  mocks.answer(sender,mockB.attempt().id(),0,0,0);
+  var a=grants.findByUserIdAndExamTypeId(userId,examA).orElseThrow();
+  var b=grants.findByUserIdAndExamTypeId(userId,examB).orElseThrow();
+  assertThat(a.getPracticeUsed()).isEqualTo(1);assertThat(a.getMocksUsed()).isEqualTo(1);
+  assertThat(b.getPracticeUsed()).isEqualTo(1);assertThat(b.getMocksUsed()).isEqualTo(1);
+
+  registration.exam(sender,examA);long paymentA=submitPaymentForExam(examA,"DEVTEST-MULTI-A-"+sender);
+  assertThat(queries.get(paymentA).examTypeId()).isEqualTo(examA);
+  review.approve(paymentA,"test-admin");
+  assertThat(grants.findByUserIdAndExamTypeId(userId,examA).orElseThrow().getAccessLevel()).isEqualTo("LIFETIME");
+  assertThat(grants.findByUserIdAndExamTypeId(userId,examB).orElseThrow().getAccessLevel()).isEqualTo("FREE");
+
+  long paymentB=submitPaymentForExam(examB,"DEVTEST-MULTI-B-"+sender);
+  assertThat(queries.get(paymentB).examTypeId()).isEqualTo(examB);
+  review.approve(paymentB,"test-admin");
+  assertThat(grants.findAllByUserIdOrderByExamTypeId(userId)).hasSize(2)
+   .allMatch(entitlement->entitlement.getAccessLevel().equals("LIFETIME"));
+  assertThat(users.findByTelegramUserId(sender).orElseThrow().getSelectedExamTypeId()).isEqualTo(examA);
+ }
+
+ long submitPaymentForExam(long target,String reference) throws Exception {
+  click("pay:open");assertThat(buttons).contains("pay:exam:"+target);
+  click("pay:exam:"+target);click(button("pay:method:"));message(Map.of("text",reference));
+  message(Map.of("photo",List.of(Map.of("file_id","test_file","file_unique_id","target_unique_"+target+"_"+sender,"file_size",100,"width",10,"height",10))));
+  return payments.status(sender).request().id();
+ }
  @Test void rejectedPaymentNotifiesAndAllowsNewRequestWithoutReferenceReuse() throws Exception {
   onboard("en",phone());String reference="DEVTEST-REJECT-"+sender;long id=submitPayment(reference);
   mvc.perform(post("/admin/payments/"+id+"/reject").param("reason","Fictional verification rejected").with(user("test-admin").roles("ADMIN")).with(csrf())).andExpect(status().is3xxRedirection());
   notifications.retryDue();verify(client).sendMessage(eq(sender),contains("Fictional verification rejected"),anyMap());assertThat(grant().getAccessLevel()).isEqualTo("FREE");
-  long next=payments.start(sender,"after-rejection").request().id();payments.select(sender,next,method);
+  long next=payments.start(sender,exam,"after-rejection").request().id();payments.select(sender,next,method);
   assertThatThrownBy(()->payments.reference(sender,next,reference)).hasMessage("payment.duplicateReference");
  }
  @Test void lostPracticeFeedbackAndReceiptAcknowledgmentPreserveCommittedState() throws Exception {

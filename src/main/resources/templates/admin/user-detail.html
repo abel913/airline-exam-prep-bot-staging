@@ -1,0 +1,14 @@
+<!doctype html><html lang="en" xmlns:th="http://www.thymeleaf.org">
+<head th:replace="~{admin/fragments :: head('Registered User')}"></head><body><header th:replace="~{admin/fragments :: header}"></header>
+<div class="shell"><nav th:replace="~{admin/fragments :: nav}"></nav><main><h1>Registered User</h1>
+<section class="panel"><dl><dt>User ID</dt><dd th:text="${user.id}"></dd><dt>Telegram identity</dt><dd th:text="${user.telegramId}"></dd>
+<dt>Language</dt><dd th:text="${user.language}"></dd><dt>Registration</dt><dd th:text="${user.status}"></dd>
+<dt>Contact</dt><dd th:text="${user.phone == null ? 'Not captured before Phase 5' : user.phone}"></dd>
+<dt>Verification source</dt><dd th:text="${user.verification}"></dd><dt>Current exam</dt><dd th:text="${user.currentExam}"></dd></dl></section>
+<h2>Exam access and usage</h2><section class="panel"><table><thead><tr><th>Exam</th><th>Tier</th><th>Practice used / allowance / remaining</th><th>Mocks used / allowance / remaining</th><th>Questions/mock</th><th>Answered</th><th>Mock history</th></tr></thead><tbody>
+<tr th:each="e : ${entitlements}"><td th:text="|${e.name} (${e.code})|"></td><td th:text="${e.tier}"></td><td th:text="|${e.practiceUsed} / ${e.practiceLimit} / ${e.practiceRemaining}|"></td>
+<td th:text="|${e.mocksUsed} / ${e.mockLimit} / ${e.mocksRemaining}|"></td><td th:text="${e.questionsPerMock}"></td><td th:text="${e.answered}"></td><td th:text="${e.mockHistory}"></td></tr></tbody></table></section>
+<h2>Payments</h2><section class="panel"><table><thead><tr><th>Request</th><th>Target exam</th><th>Status</th><th>Amount</th><th>Created</th><th>Reviewed</th></tr></thead><tbody>
+<tr th:each="p : ${payments}"><td><a th:href="@{/admin/payments/{id}(id=${p.id})}" th:text="${p.id}"></a></td><td th:text="${p.examCode}"></td><td th:text="${p.status}"></td>
+<td th:text="|${p.amount} ${p.currency}|"></td><td th:text="${p.created}"></td><td th:text="${p.reviewed}"></td></tr></tbody></table></section>
+</main></div></body></html>

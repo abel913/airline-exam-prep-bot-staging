@@ -35,8 +35,10 @@ public class StudentPresenter {
   rows.add(List.of(button(lang,"history.practice","s:ph:0"),button(lang,"history.mock","s:mh:0")));
   rows.add(List.of(button(lang,"insights.title","s:weak:0"),button(lang,"insights.practice","s:recommend")));
   rows.add(List.of(button(lang,s.lifetime()?"payment.activeButton":"payment.upgrade","pay:open"),button(lang,"payment.statusButton","pay:status")));
+  rows.add(List.of(button(lang,"student.switchExam","s:exams")));
   if(intro.active()!=null) rows.add(List.of(button(lang,"mock.resume","m:o:"+intro.active().id()+":-1")));
-  send(chat,message(lang,"student.welcome",allowance(s,false),allowance(s,true)),rows);
+  send(chat,message(lang,"student.currentExam",lang.equals("am")&&!s.examNameAm().isBlank()?s.examNameAm():s.examName())+"\n\n"+
+   message(lang,"student.welcome",allowance(s,false),allowance(s,true)),rows);
  }
  public void categories(long chat,Student s,List<StudentQuestionSelector.CategoryChoice> categories) throws InterruptedException {
   categories(chat,s,categories,0);
@@ -167,5 +169,15 @@ public class StudentPresenter {
   send(chat,message(lang,key),rows);
  }
  public void help(long chat,String lang) throws InterruptedException { send(chat,message(lang,"student.helpText"),home(lang)); }
+ public void examSelector(long chat,String lang,java.util.List<com.airlineprep.bot.user.RegistrationView.ExamOption> exams,boolean upgrade) throws InterruptedException {
+  var rows=exams.stream().map(e->List.of(Map.of("text",(e.current()?"✅ ":"")+(lang.equals("am")&&!e.nameAm().isBlank()?e.nameAm():e.name()),
+   "callback_data",(upgrade?"pay:exam:":"exam:")+e.id()))).toList();
+  send(chat,message(lang,upgrade?"payment.chooseExam":"registration.switchExam"),rows);
+ }
+ public void purchaseExamSelector(long chat,String lang,java.util.List<com.airlineprep.bot.user.RegistrationService.PurchaseExam> exams) throws InterruptedException {
+  var rows=exams.stream().map(e->List.of(Map.of("text",(e.current()?"✅ ":"")+
+   (lang.equals("am")&&!e.nameAm().isBlank()?e.nameAm():e.name())+" — "+message(lang,"payment.tier."+e.tier()),"callback_data","pay:exam:"+e.id()))).toList();
+  send(chat,message(lang,"payment.chooseExam"),rows);
+ }
  public void help(long chat,String lang,String support) throws InterruptedException { send(chat,message(lang,"student.helpText")+"\n\n"+message(lang,"student.paymentHelp")+(support.isBlank()?"":"\n\n"+support),home(lang)); }
 }

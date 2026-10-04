@@ -25,7 +25,7 @@ public class PaymentReviewService {
   store.jdbc().update("UPDATE payment_requests SET status=?,open_user_id=NULL,reviewed_at=?,reviewed_by=?,rejection_reason=? WHERE id=?",
    target.name(),java.sql.Timestamp.from(clock.instant()),admin,approve?null:reason.strip(),id);
   audit.append("WEB_ADMIN",admin,approve?"PAYMENT_APPROVED":"PAYMENT_REJECTED","PAYMENT",id,approve?(granted?"lifetime=granted":"lifetime=already-active"):"user-visible-reason-recorded");
-  var student=access.lock(users.findById(p.userId()).orElseThrow().getTelegramUserId());
+  var student=access.lock(users.findById(p.userId()).orElseThrow().getTelegramUserId(),p.examTypeId());
   outbox.enqueue(id,approve?"USER_APPROVED":"USER_REJECTED",student);return queries.get(id);
  }
 }

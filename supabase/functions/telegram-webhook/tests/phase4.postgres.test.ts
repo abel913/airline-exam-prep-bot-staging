@@ -9,12 +9,13 @@ import { createPaymentFlow } from "../payment-flow.mjs";
 // Intentionally accepts only a disposable local database. Never run these
 // fixture mutations against a hosted staging or production database.
 const databaseUrl = Deno.env.get("EDGE_TEST_DATABASE_URL") ?? "";
+const PHASE5_SCHEMA_VERSION = "19";
 const parsed = databaseUrl ? new URL(databaseUrl) : null;
 if (!parsed || !["postgres:", "postgresql:"].includes(parsed.protocol)
   || !["127.0.0.1", "localhost"].includes(parsed.hostname)
   || parsed.port !== "5432"
-  || parsed.pathname !== "/airline_exam_bot_phase4_test") {
-  throw new Error("EDGE_TEST_DATABASE_URL must target 127.0.0.1:5432/airline_exam_bot_phase4_test");
+  || parsed.pathname !== "/airline_exam_bot_phase5_test") {
+  throw new Error("EDGE_TEST_DATABASE_URL must target 127.0.0.1:5432/airline_exam_bot_phase5_test");
 }
 
 let nextTelegramId = BigInt(Date.now()) * 1000n;
@@ -38,7 +39,11 @@ Deno.test("Phase 4 PostgreSQL: mocks and payments preserve transactional state",
   try {
     const migration = await database.withConnection(async (c) => (await c.queryObject<{ version: string; success: boolean }>`
       SELECT version,success FROM flyway_schema_history WHERE success=TRUE ORDER BY installed_rank DESC LIMIT 1`).rows[0]);
-    assert.equal(migration?.version, "17", "local disposable database must be migrated through V17");
+    assert.equal(migration?.version, PHASE5_SCHEMA_VERSION, "local disposable database must be migrated through the Phase 5 schema");
+    const requiredJavaMigrations = await database.withConnection(async (c) => (await c.queryObject<{ count: bigint }>`
+      SELECT COUNT(*) AS count FROM flyway_schema_history
+      WHERE success=TRUE AND version IN ('16','17','18','19')`).rows[0].count);
+    assert.equal(Number(requiredJavaMigrations), 4, "V16/V17/V18/V19 Java migrations must all be applied");
     await database.healthCheck();
     // Keep each fixture statement tagged so the driver performs parameterization.
     await database.transaction(async (c) => {
@@ -62,9 +67,9 @@ Deno.test("Phase 4 PostgreSQL: mocks and payments preserve transactional state",
           VALUES(${telegramId},'en',${examId},'COMPLETED',${hash},CURRENT_TIMESTAMP,CURRENT_TIMESTAMP,CURRENT_TIMESTAMP) RETURNING id`;
         const id = String(row.rows[0].id);
         await c.queryArray`INSERT INTO access_entitlements
-          (user_id,phone_identity_hash,access_level,practice_limit,mock_limit,questions_per_mock,practice_used,mocks_used,
+          (user_id,exam_type_id,phone_identity_hash,access_level,practice_limit,mock_limit,questions_per_mock,practice_used,mocks_used,
            grant_source,granted_at,created_at,updated_at)
-          VALUES(${id},${hash},'FREE',10,2,3,0,0,'REGISTRATION',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP,CURRENT_TIMESTAMP)`;
+          VALUES(${id},${examId},${hash},'FREE',10,2,3,0,0,'REGISTRATION',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP,CURRENT_TIMESTAMP)`;
         return id;
       };
       userId = await createUser();
@@ -157,9 +162,9 @@ Deno.test("Phase 4 PostgreSQL: mocks and payments preserve transactional state",
     await database.transaction(async (c) => { await c.queryArray`UPDATE mock_attempts SET deadline_at=CURRENT_TIMESTAMP-INTERVAL '1 second' WHERE id=${lifetimeMock.attempt.id}`; });
     await mock.answer(tgLookup(userId), lifetimeMock.attempt.id, 1, 0, 0);
 
-    await assert.rejects(payment.start(tgLookup(userId), crypto.randomUUID()), (e) => e instanceof PaymentError && e.key === "payment.disabled");
+    await assert.rejects(payment.start(tgLookup(userId), examId, crypto.randomUUID()), (e) => e instanceof PaymentError && e.key === "payment.disabled");
     await database.transaction(async (c) => { await c.queryArray`UPDATE app_settings SET payment_enabled=TRUE,manual_payment_enabled=TRUE WHERE id=1`; });
-    const pending = await payment.start(tgLookup(userId), crypto.randomUUID());
+    const pending = await payment.start(tgLookup(userId), examId, crypto.randomUUID());
     const reqId = pending.request.id;
     await assert.rejects(payment.select(tgLookup(userId), reqId, "999999"), (e) => e instanceof PaymentError);
     await payment.select(tgLookup(userId), reqId, methodId);
@@ -170,7 +175,7 @@ Deno.test("Phase 4 PostgreSQL: mocks and payments preserve transactional state",
     ]);
     assert.deepEqual(duplicateReferenceReplay.map((v) => v.request.id), [reqId, reqId]);
     await assert.rejects(payment.reference(tgLookup(userId), reqId, "bad"), (e) => e instanceof PaymentError);
-    const otherRequest = await payment.start(tgLookup(otherId), crypto.randomUUID());
+    const otherRequest = await payment.start(tgLookup(otherId), examId, crypto.randomUUID());
     await payment.select(tgLookup(otherId), otherRequest.request.id, methodId);
     await assert.rejects(payment.reference(tgLookup(otherId), otherRequest.request.id, "phase4-test-001"),
       (e) => e instanceof PaymentError && e.key === "payment.duplicateReference");

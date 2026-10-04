@@ -6,8 +6,9 @@ import { PracticeService, PracticeError } from "../practice-service.mjs";
 // This suite deliberately refuses staging/remote URLs. Flyway must first migrate this disposable DB.
 const databaseUrl = Deno.env.get("EDGE_TEST_DATABASE_URL") ?? "";
 const parsed = new URL(databaseUrl);
-if (!['127.0.0.1', 'localhost'].includes(parsed.hostname) || !parsed.pathname.startsWith('/edge_phase3')) {
-  throw new Error("EDGE_TEST_DATABASE_URL must identify a disposable loopback edge_phase3 database");
+if (!['127.0.0.1', 'localhost'].includes(parsed.hostname) || parsed.port !== '5432'
+  || parsed.pathname !== '/airline_exam_bot_phase5_test') {
+  throw new Error("EDGE_TEST_DATABASE_URL must identify 127.0.0.1:5432/airline_exam_bot_phase5_test");
 }
 let sequence = BigInt(Date.now()) * 1000n;
 const update = () => String(sequence++);
@@ -29,6 +30,7 @@ async function fixture(limitValue = 3) {
   const prefix = `edge-${crypto.randomUUID().slice(0, 8)}`;
   const userTelegramId = update();
   const otherTelegramId = update();
+  const questionIds: string[] = [];
   const result = await database.transaction(async (client) => {
     const queryId = idQuery(client);
     const examId = await queryId`INSERT INTO exam_types(code,name,name_am,active,display_order,created_at,updated_at)
@@ -42,9 +44,9 @@ async function fixture(limitValue = 3) {
       const userId = await queryId`INSERT INTO bot_users(telegram_user_id,preferred_language,selected_exam_type_id,registration_status,
         phone_identity_hash,registration_completed_at,created_at,updated_at)
         VALUES(${telegramId},'en',${examId},'COMPLETED',${hash},CURRENT_TIMESTAMP,CURRENT_TIMESTAMP,CURRENT_TIMESTAMP) RETURNING id`;
-      await client.queryArray`INSERT INTO access_entitlements(user_id,phone_identity_hash,access_level,practice_limit,mock_limit,
+      await client.queryArray`INSERT INTO access_entitlements(user_id,exam_type_id,phone_identity_hash,access_level,practice_limit,mock_limit,
         questions_per_mock,practice_used,mocks_used,grant_source,granted_at,created_at,updated_at)
-        VALUES(${userId},${hash},'FREE',${limitValue},2,50,0,0,'REGISTRATION',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP,CURRENT_TIMESTAMP)`;
+        VALUES(${userId},${examId},${hash},'FREE',${limitValue},2,50,0,0,'REGISTRATION',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP,CURRENT_TIMESTAMP)`;
       return userId;
     };
     return { examId, categoryId, premiumCategoryId, userId: await user(userTelegramId), otherId: await user(otherTelegramId) };
@@ -69,6 +71,7 @@ async function fixture(limitValue = 3) {
       return await queryId`INSERT INTO questions(status,created_by,updated_by,created_at,updated_at)
         VALUES('DRAFT','edge-test','edge-test',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP) RETURNING id`;
     });
+    questionIds.push(questionId);
     const versionId = await version(questionId, 1, options);
     if (options.status) await database.transaction(async (client) => { await client.queryArray`UPDATE questions SET status=${options.status} WHERE id=${questionId}`; });
     return { questionId, versionId };
@@ -81,7 +84,27 @@ async function fixture(limitValue = 3) {
     return Number(query.rows[0].count);
   });
   return { ...result, database, services, userTelegramId, otherTelegramId, question, version, count,
-    close: async () => { for (const db of databases) await db.close(); } };
+    close: async () => {
+      await database.transaction(async (client) => {
+        await client.queryArray`DELETE FROM practice_update_receipts WHERE user_id IN (${result.userId},${result.otherId})`;
+        await client.queryArray`DELETE FROM practice_sessions WHERE user_id IN (${result.userId},${result.otherId})`;
+        await client.queryArray`DELETE FROM practice_usage WHERE user_id IN (${result.userId},${result.otherId})`;
+        await client.queryArray`UPDATE practice_deliveries SET next_delivery_id=NULL,review_delivery_id=NULL WHERE user_id IN (${result.userId},${result.otherId})`;
+        await client.queryArray`DELETE FROM practice_deliveries WHERE user_id IN (${result.userId},${result.otherId})`;
+        await client.queryArray`DELETE FROM access_entitlements WHERE user_id IN (${result.userId},${result.otherId})`;
+        await client.queryArray`DELETE FROM bot_users WHERE id IN (${result.userId},${result.otherId})`;
+        if (questionIds.length) {
+          await client.queryArray`UPDATE questions SET status='DRAFT',current_version_id=NULL WHERE id=ANY(${questionIds.map(Number)})`;
+          await client.queryArray`DELETE FROM question_options WHERE version_id IN (SELECT id FROM question_versions WHERE question_id=ANY(${questionIds.map(Number)}))`;
+          await client.queryArray`DELETE FROM question_versions WHERE question_id=ANY(${questionIds.map(Number)})`;
+          await client.queryArray`DELETE FROM questions WHERE id=ANY(${questionIds.map(Number)})`;
+        }
+        await client.queryArray`DELETE FROM categories WHERE exam_type_id IN
+          (SELECT id FROM exam_types WHERE code LIKE 'edge-%' AND name='Synthetic Edge Test Exam')`;
+        await client.queryArray`DELETE FROM exam_types WHERE code LIKE 'edge-%' AND name='Synthetic Edge Test Exam'`;
+      });
+      for (const db of databases) await db.close();
+    } };
 }
 
 Deno.test("PostgreSQL: actual selection SQL excludes unpublished, wrong exam, inactive taxonomy and premium-only content", async () => {
@@ -133,6 +156,43 @@ Deno.test("PostgreSQL: display/skip cost zero, concurrent answer costs one, resu
     await assert.rejects(service.historyDelivery(f.otherTelegramId, skipped.delivery.id), invalid);
     await assert.rejects(service.next(f.otherTelegramId, firstUpdate), invalid);
     await assert.rejects(service.answer(f.userTelegramId, first.delivery.id, 7), invalid);
+  } finally { await f.close(); }
+});
+
+Deno.test("PostgreSQL: practice selection and usage stay independent per exam", async () => {
+  const f = await fixture(4);
+  try {
+    const examAQuestion = await f.question();
+    const examB = await f.database.transaction(async (client) => {
+      const queryId = idQuery(client);
+      const code = `edge-${crypto.randomUUID().slice(0, 8)}`;
+      const examId = await queryId`INSERT INTO exam_types(code,name,name_am,active,display_order,created_at,updated_at)
+        VALUES(${code},'Synthetic Edge Test Exam','',TRUE,0,CURRENT_TIMESTAMP,CURRENT_TIMESTAMP) RETURNING id`;
+      const categoryId = await queryId`INSERT INTO categories(exam_type_id,code,name,name_am,active,display_order,created_at,updated_at)
+        VALUES(${examId},'numbers','Synthetic numbers','',TRUE,0,CURRENT_TIMESTAMP,CURRENT_TIMESTAMP) RETURNING id`;
+      const hash = (await client.queryObject<{ phone_identity_hash: string }>`SELECT phone_identity_hash FROM access_entitlements WHERE user_id=${f.userId}`).rows[0].phone_identity_hash;
+      await client.queryArray`INSERT INTO access_entitlements(user_id,exam_type_id,phone_identity_hash,access_level,practice_limit,mock_limit,
+        questions_per_mock,practice_used,mocks_used,grant_source,granted_at,created_at,updated_at)
+        VALUES(${f.userId},${examId},${hash},'FREE',4,2,50,0,0,'REGISTRATION',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP,CURRENT_TIMESTAMP)`;
+      return { examId, categoryId };
+    });
+    const examBQuestion = await f.question({ examId: examB.examId, categoryId: examB.categoryId });
+    const service = f.services[0];
+    await f.database.transaction(async (client) => { await client.queryArray`UPDATE bot_users SET selected_exam_type_id=${examB.examId} WHERE id=${f.userId}`; });
+    const bDelivery = await service.next(f.userTelegramId, update());
+    assert.equal(bDelivery.question.id, examBQuestion.questionId);
+    await service.answer(f.userTelegramId, bDelivery.delivery.id, 0);
+    await f.database.transaction(async (client) => { await client.queryArray`UPDATE bot_users SET selected_exam_type_id=${f.examId} WHERE id=${f.userId}`; });
+    const aDelivery = await service.next(f.userTelegramId, update());
+    assert.equal(aDelivery.question.id, examAQuestion.questionId);
+    await service.answer(f.userTelegramId, aDelivery.delivery.id, 0);
+    const usage = await f.database.withConnection(async (client) => (await client.queryObject<{ exam_type_id: bigint; used: bigint }>`
+      SELECT exam_type_id,COUNT(*) AS used FROM practice_usage WHERE user_id=${f.userId} GROUP BY exam_type_id ORDER BY exam_type_id`).rows);
+    assert.equal(usage.length, 2);
+    assert.deepEqual(usage.map((row) => Number(row.used)), [1, 1]);
+    const entitlements = await f.database.withConnection(async (client) => (await client.queryObject<{ practice_used: number }>`
+      SELECT practice_used FROM access_entitlements WHERE user_id=${f.userId} ORDER BY exam_type_id`).rows);
+    assert.deepEqual(entitlements.map((row) => row.practice_used), [1, 1]);
   } finally { await f.close(); }
 });
 

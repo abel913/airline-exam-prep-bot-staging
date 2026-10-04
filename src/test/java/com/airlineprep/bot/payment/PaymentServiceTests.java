@@ -2,6 +2,7 @@ package com.airlineprep.bot.payment;
 import java.math.BigDecimal;
 import com.airlineprep.bot.practice.*;
 import com.airlineprep.bot.mock.*;
+import com.airlineprep.bot.admin.CatalogForm;
 import org.junit.jupiter.api.*;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
@@ -12,14 +13,14 @@ class PaymentServiceTests extends PaymentFixture {
  @Autowired PracticeService practice;@Autowired MockAttemptService mocks;@Autowired StudentProgressService progress;
  @BeforeEach void setup() {setupPayment();}
  @Test void disabledFlagsAndLifetimeBlockNewRequests() {
-  configure(false,true,new BigDecimal("50"));assertThatThrownBy(()->payments.start(sender,"disabled")).hasMessage("payment.disabled");
-  configure(true,false,new BigDecimal("50"));assertThatThrownBy(()->payments.start(sender,"manual")).hasMessage("payment.disabled");
-  grant().setAccessLevel("LIFETIME");assertThatThrownBy(()->payments.start(sender,"paid")).hasMessage("payment.lifetime");
+  configure(false,true,new BigDecimal("50"));assertThatThrownBy(()->payments.start(sender,exam,"disabled")).hasMessage("payment.disabled");
+  configure(true,false,new BigDecimal("50"));assertThatThrownBy(()->payments.start(sender,exam,"manual")).hasMessage("payment.disabled");
+  grant().setAccessLevel("LIFETIME");assertThatThrownBy(()->payments.start(sender,exam,"paid")).hasMessage("payment.lifetime");
  }
  @Test void priceAndCurrencySnapshotDoNotFollowSettings() {
-  long id=payments.start(sender,"first").request().id();configure(true,true,new BigDecimal("70"));
+  long id=payments.start(sender,exam,"first").request().id();configure(true,true,new BigDecimal("70"));
   assertThat(queries.get(id).amount()).isEqualByComparingTo("50");assertThat(queries.get(id).currency()).isEqualTo("ETB");
-  prepareFixture(2);assertThat(payments.start(sender,"second").request().amount()).isEqualByComparingTo("70");
+  prepareFixture(2);assertThat(payments.start(sender,exam,"second").request().amount()).isEqualByComparingTo("70");
  }
  @Test void methodSnapshotSurvivesEditAndDeactivation() {
   long id=selected();var old=methods.get(method).details();
@@ -31,14 +32,14 @@ class PaymentServiceTests extends PaymentFixture {
  }
  @Test void invalidInactiveMethodsAndStaleEditsRejected() {
   long inactive=methods.save(null,methodForm("BANK_TRANSFER",false),"test-admin");
-  long id=payments.start(sender,"methods").request().id();
+  long id=payments.start(sender,exam,"methods").request().id();
   assertThat(payments.status(sender).methods()).extracting(PaymentMethodService.Method::id).containsExactly(method);
   assertThatThrownBy(()->payments.select(sender,id,inactive)).hasMessage("payment.methodInvalid");
   assertThatThrownBy(()->payments.select(sender,id,999999)).hasMessage("payment.methodInvalid");
   assertThatThrownBy(()->methods.save(method,methodForm("TELEBIRR",true),"test-admin")).hasMessage("payment.stale");
  }
  @Test void oneOpenRequestResumeAndRetryKeepStableEvidenceAndAudit() {
-  long id=selected();assertThat(payments.start(sender,"another").request().id()).isEqualTo(id);
+  long id=selected();assertThat(payments.start(sender,exam,"another").request().id()).isEqualTo(id);
   payments.select(sender,id,method);payments.reference(sender,id,"  DEVTEST-ab.c/1  ");payments.reference(sender,id,"devtest-AB.C/1");
   assertThat(payments.status(sender).request().status()).isEqualTo(PaymentStatus.AWAITING_RECEIPT);
   var receipt=receipt("stable");payments.receipt(sender,id,receipt);payments.receipt(sender,id,receipt);
@@ -100,5 +101,74 @@ class PaymentServiceTests extends PaymentFixture {
   long second=selected();payments.reference(sender,second,"DEVTEST-DUP-RECEIPT");payments.receipt(sender,second,receipt(unique));
   assertThat(queries.duplicateReceipts(queries.get(second))).isEqualTo(1);
   assertThat(queries.get(second).status()).isEqualTo(PaymentStatus.PENDING_REVIEW);
+ }
+
+ @Test void explicitPurchaseTargetIsIndependentFromCurrentExamAndIdempotencyScope() {
+  long examA=exam;long userId=users.findByTelegramUserId(sender).orElseThrow().getId();
+  long examB=catalog.save(false,null,new CatalogForm("payment-target-"+sender,"Synthetic second exam","",true,1,null),"test-admin");
+  registration.exam(sender,examB);registration.exam(sender,examA);
+  assertSelected(examA);
+
+  long requestA=submitForExam(examA,"same-key","TARGET-A-"+sender);
+  assertThat(payments.start(sender,examA,"same-key").request().id()).isEqualTo(requestA);
+  review.approve(requestA,"test-admin");
+  assertThat(grants.findByUserIdAndExamTypeId(userId,examA).orElseThrow().getAccessLevel()).isEqualTo("LIFETIME");
+  assertThat(grants.findByUserIdAndExamTypeId(userId,examB).orElseThrow().getAccessLevel()).isEqualTo("FREE");
+  assertSelected(examA);
+
+  long requestB=submitForExam(examB,"same-key","TARGET-B-"+sender);
+  assertThat(requestB).isNotEqualTo(requestA);assertThat(queries.get(requestB).examTypeId()).isEqualTo(examB);
+  review.approve(requestB,"test-admin");
+  assertThat(grants.findByUserIdAndExamTypeId(userId,examA).orElseThrow().getAccessLevel()).isEqualTo("LIFETIME");
+  assertThat(grants.findByUserIdAndExamTypeId(userId,examB).orElseThrow().getAccessLevel()).isEqualTo("LIFETIME");
+  assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM lifetime_access_grants WHERE user_id=? AND exam_type_id IN (?,?)",Integer.class,userId,examA,examB)).isEqualTo(2);
+  assertSelected(examA);
+ }
+
+ @Test void explicitTargetLifetimeAndInactiveValidationDoNotUseCurrentExamTier() {
+  long examA=exam;long userId=users.findByTelegramUserId(sender).orElseThrow().getId();
+  long examB=catalog.save(false,null,new CatalogForm("payment-validation-"+sender,"Synthetic validation exam","",true,1,null),"test-admin");
+  registration.exam(sender,examB);registration.exam(sender,examA);
+  var a=grants.findByUserIdAndExamTypeId(userId,examA).orElseThrow();
+  var b=grants.findByUserIdAndExamTypeId(userId,examB).orElseThrow();
+  b.setAccessLevel("LIFETIME");
+  assertThatThrownBy(()->payments.start(sender,examB,"target-paid")).hasMessage("payment.lifetime");
+  b.setAccessLevel("FREE");a.setAccessLevel("LIFETIME");
+  assertThat(payments.start(sender,examB,"target-free").request().examTypeId()).isEqualTo(examB);
+  assertSelected(examA);
+  assertThatThrownBy(()->payments.start(sender,Long.MAX_VALUE,"target-missing")).hasMessage("registration.examUnavailable");
+ }
+
+ @Test void inactivePurchaseTargetIsRejectedWithoutCreatingRequestOrGrant() {
+  long examA=exam;long userId=users.findByTelegramUserId(sender).orElseThrow().getId();
+  long examB=catalog.save(false,null,new CatalogForm("payment-inactive-"+sender,"Synthetic inactive exam","",true,1,null),"test-admin");
+  registration.exam(sender,examB);registration.exam(sender,examA);
+  catalog.save(false,examB,new CatalogForm("payment-inactive-"+sender,"Synthetic inactive exam","",false,1,null),"test-admin");
+  int before=jdbc.queryForObject("SELECT COUNT(*) FROM payment_requests WHERE user_id=?",Integer.class,userId);
+  assertThatThrownBy(()->payments.start(sender,examB,"inactive-target")).hasMessage("registration.examUnavailable");
+  assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM payment_requests WHERE user_id=?",Integer.class,userId)).isEqualTo(before);
+  assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM lifetime_access_grants WHERE user_id=? AND exam_type_id=?",Integer.class,userId,examB)).isZero();
+  assertSelected(examA);
+ }
+
+ @Test void rejectionOfExplicitOtherExamTargetDoesNotGrantOrChangeSelection() {
+  long examA=exam;long userId=users.findByTelegramUserId(sender).orElseThrow().getId();
+  long examB=catalog.save(false,null,new CatalogForm("payment-reject-"+sender,"Synthetic rejection exam","",true,1,null),"test-admin");
+  registration.exam(sender,examB);registration.exam(sender,examA);
+  long request=submitForExam(examB,"reject-target","TARGET-REJECT-"+sender);
+  assertThat(queries.get(request).examTypeId()).isEqualTo(examB);
+  review.reject(request,"test-admin","Synthetic rejection");
+  assertThat(grants.findByUserIdAndExamTypeId(userId,examA).orElseThrow().getAccessLevel()).isEqualTo("FREE");
+  assertThat(grants.findByUserIdAndExamTypeId(userId,examB).orElseThrow().getAccessLevel()).isEqualTo("FREE");
+  assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM lifetime_access_grants WHERE payment_request_id=?",Integer.class,request)).isZero();
+  assertSelected(examA);
+ }
+
+ private long submitForExam(long target,String key,String reference) {
+  long id=payments.start(sender,target,key).request().id();payments.select(sender,id,method);
+  payments.reference(sender,id,reference);payments.receipt(sender,id,receipt("target_"+id));return id;
+ }
+ private void assertSelected(long expected) {
+  assertThat(users.findByTelegramUserId(sender).orElseThrow().getSelectedExamTypeId()).isEqualTo(expected);
  }
 }

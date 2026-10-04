@@ -27,11 +27,11 @@ class PaymentPostgresIT {
   var f=SettingsForm.from(settings.current());
   settings.update(new SettingsForm(f.freePracticeLimit(),f.freeMockLimit(),f.questionsPerMock(),new BigDecimal("50"),"ETB",true,true,f.supportInfo(),f.mockDurationMinutes()),"verification");
   long method=methods.save(null,new PaymentMethodService.Form("BANK_TRANSFER","DEVELOPMENT TEST","Fictional","NOT-A-REAL-ACCOUNT","Do not pay",true,0,null),"verification");
-  long first=payments.start(sender,"first").request().id();payments.select(sender,first,method);
+  long first=payments.start(sender,exam,"first").request().id();payments.select(sender,first,method);
   payments.reference(sender,first,"DEVTEST-"+suffix);
   payments.receipt(sender,first,new ReceiptMetadata("fake_file","fake_unique","PHOTO",null,"image/jpeg",100));
   review.reject(first,"verification","Development test rejection");
-  long second=payments.start(sender,"second").request().id();payments.select(sender,second,method);
+  long second=payments.start(sender,exam,"second").request().id();payments.select(sender,second,method);
   assertThatThrownBy(()->payments.reference(sender,second,"devtest-"+suffix)).hasMessage("payment.duplicateReference");
   payments.reference(sender,second,"DEVTEST2-"+suffix);
   payments.receipt(sender,second,new ReceiptMetadata("fake_file2","fake_unique2","DOCUMENT","test.pdf","application/pdf",100));

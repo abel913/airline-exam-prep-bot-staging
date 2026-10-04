@@ -30,7 +30,7 @@ export class MockUnitOfWork {
       "SELECT id,telegram_user_id,preferred_language,selected_exam_type_id,registration_status FROM bot_users WHERE telegram_user_id=?",tg))[0];
     if(!u||u.registration_status!=="COMPLETED"||u.selected_exam_type_id===null)return null;
     const g=(await rows<{access_level:string;practice_limit:number;practice_used:number;mock_limit:number;mocks_used:number;questions_per_mock:number}>(
-      this.db,"SELECT access_level,practice_limit,practice_used,mock_limit,mocks_used,questions_per_mock FROM access_entitlements WHERE user_id=? FOR UPDATE",sid(u.id)))[0];
+      this.db,"SELECT access_level,practice_limit,practice_used,mock_limit,mocks_used,questions_per_mock FROM access_entitlements WHERE user_id=? AND exam_type_id=? FOR UPDATE",sid(u.id),sid(u.selected_exam_type_id)))[0];
     if(!g)return null;
     return {id:sid(u.id),telegramId:sid(u.telegram_user_id),examId:sid(u.selected_exam_type_id),language:u.preferred_language==="am"?"am":"en",
       accessLevel:g.access_level as PracticeStudent["accessLevel"],practiceLimit:Number(g.practice_limit),practiceUsed:Number(g.practice_used),
@@ -45,9 +45,9 @@ export class MockUnitOfWork {
   async own(s:PracticeStudent,id:string):Promise<Attempt|null>{return (await rows<Attempt>(this.db,
     "SELECT * FROM mock_attempts WHERE id=? AND user_id=? AND exam_type_id=? FOR UPDATE",id,s.id,s.examId))[0]??null;}
   async active(s:PracticeStudent):Promise<Attempt|null>{return (await rows<Attempt>(this.db,
-    "SELECT * FROM mock_attempts WHERE active_user_id=? FOR UPDATE",s.id))[0]??null;}
+    "SELECT * FROM mock_attempts WHERE active_user_id=? AND exam_type_id=? FOR UPDATE",s.id,s.examId))[0]??null;}
   async creation(s:PracticeStudent,key:string):Promise<Attempt|null>{return (await rows<Attempt>(this.db,
-    "SELECT * FROM mock_attempts WHERE user_id=? AND creation_key=? FOR UPDATE",s.id,key))[0]??null;}
+    "SELECT * FROM mock_attempts WHERE user_id=? AND exam_type_id=? AND creation_key=? FOR UPDATE",s.id,s.examId,key))[0]??null;}
   async eligible(s:PracticeStudent,count:number){return await rows<{question_id:string|bigint;version_id:string|bigint}>(this.db,
     "SELECT q.id question_id,v.id version_id FROM questions q JOIN question_versions v ON v.id=q.current_version_id JOIN exam_types e ON e.id=v.exam_type_id JOIN categories c ON c.id=v.category_id AND c.exam_type_id=e.id WHERE q.status='PUBLISHED' AND v.mock_pool=TRUE AND e.active=TRUE AND c.active=TRUE AND e.id=? ORDER BY RANDOM() LIMIT ?",
     s.examId,count);}
@@ -83,9 +83,9 @@ export class MockUnitOfWork {
     if(state.first_answer_at===null){
       if(s.accessLevel!=="LIFETIME"){
         const g=(await rows<{mocks_used:number;mock_limit:number;access_level:string}>(this.db,
-          "SELECT mocks_used,mock_limit,access_level FROM access_entitlements WHERE user_id=? FOR UPDATE",s.id))[0];
+          "SELECT mocks_used,mock_limit,access_level FROM access_entitlements WHERE user_id=? AND exam_type_id=? FOR UPDATE",s.id,s.examId))[0];
         if(!g||(g.access_level!=="LIFETIME"&&Number(g.mocks_used)>=Number(g.mock_limit)))throw new Error("MOCK_LIMIT");
-        if(g.access_level!=="LIFETIME")await run(this.db,"UPDATE access_entitlements SET mocks_used=mocks_used+1,updated_at=CURRENT_TIMESTAMP WHERE user_id=?",s.id);
+        if(g.access_level!=="LIFETIME")await run(this.db,"UPDATE access_entitlements SET mocks_used=mocks_used+1,updated_at=CURRENT_TIMESTAMP WHERE user_id=? AND exam_type_id=?",s.id,s.examId);
       }
       await run(this.db,"UPDATE mock_attempts SET first_answer_at=CURRENT_TIMESTAMP WHERE id=? AND first_answer_at IS NULL",a);
     }

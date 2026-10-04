@@ -11,6 +11,7 @@ public class AccessEntitlement extends TimedEntity {
     private Long id;
 
     private Long userId;
+    private Long examTypeId;
     @Column(length = 64)
     private String phoneIdentityHash;
 
@@ -32,6 +33,8 @@ public class AccessEntitlement extends TimedEntity {
     public Long getId() { return id; }
     public Long getUserId() { return userId; }
     public void setUserId(Long value) { userId = value; }
+    public Long getExamTypeId() { return examTypeId; }
+    public void setExamTypeId(Long value) { examTypeId = value; }
     public String getPhoneIdentityHash() { return phoneIdentityHash; }
     public void setPhoneIdentityHash(String value) { phoneIdentityHash = value; }
     public String getAccessLevel() { return accessLevel; }

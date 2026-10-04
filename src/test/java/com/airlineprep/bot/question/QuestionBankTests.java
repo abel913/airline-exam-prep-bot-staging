@@ -93,6 +93,7 @@ class QuestionBankTests extends IsolatedDatabaseSupport {
  @Autowired com.airlineprep.bot.audit.AdminChangeRepository changes;
  @Autowired org.springframework.jdbc.core.JdbcTemplate jdbc;
  @Autowired com.airlineprep.bot.user.BotUserRepository users;
+ @Autowired com.airlineprep.bot.user.RegistrationService registration;
  @Autowired ImportRowRepository rows;
  @Autowired QuestionFileParser parser;
  @Autowired CatalogService catalog;
@@ -300,7 +301,7 @@ class QuestionBankTests extends IsolatedDatabaseSupport {
   transition(archived,QuestionStatus.ARCHIVED);
   // Add student practice history and a frozen mock item for the two historically used questions.
   long user=unusedStudentId();Question usedQuestion=questions.get(used);
-  jdbc.update("INSERT INTO practice_deliveries(user_id,question_id,version_id,created_at) VALUES (?,?,?,?)",user,used,usedQuestion.currentVersion.id,java.sql.Timestamp.from(java.time.Instant.now()));
+  jdbc.update("INSERT INTO practice_deliveries(user_id,exam_type_id,question_id,version_id,created_at) VALUES (?,?,?,?,?)",user,exam,used,usedQuestion.currentVersion.id,java.sql.Timestamp.from(java.time.Instant.now()));
   jdbc.update("INSERT INTO mock_attempts(user_id,exam_type_id,creation_key,status,question_count,cursor_position,created_at,submitted_at,unanswered_count) VALUES (?,?,?,'SUBMITTED',1,0,?,?,1)",user,exam,"import-remove-"+published,java.sql.Timestamp.from(java.time.Instant.now()),java.sql.Timestamp.from(java.time.Instant.now()));
   long attempt=jdbc.queryForObject("SELECT MAX(id) FROM mock_attempts",Long.class);
   jdbc.update("INSERT INTO mock_items(attempt_id,sequence_number,question_id,version_id) VALUES (?,0,?,?)",attempt,published,questions.get(published).currentVersion.id);
@@ -389,7 +390,7 @@ class QuestionBankTests extends IsolatedDatabaseSupport {
  }
  @Test void bulkDeleteSkipsPracticeMockAndImportLinkedDrafts() throws Exception {
   long practice=create();var p=questions.get(practice);long user=unusedStudentId();
-  jdbc.update("INSERT INTO practice_deliveries(user_id,question_id,version_id,created_at) VALUES (?,?,?,?)",user,practice,p.currentVersion.id,java.sql.Timestamp.from(java.time.Instant.now()));
+  jdbc.update("INSERT INTO practice_deliveries(user_id,exam_type_id,question_id,version_id,created_at) VALUES (?,?,?,?,?)",user,exam,practice,p.currentVersion.id,java.sql.Timestamp.from(java.time.Instant.now()));
   long mock=create();var m=questions.get(mock);jdbc.update("INSERT INTO mock_attempts(user_id,exam_type_id,creation_key,status,question_count,cursor_position,created_at,submitted_at,unanswered_count) VALUES (?,?,?,'SUBMITTED',1,0,?,?,1)",user,exam,"bulk-delete-"+mock,java.sql.Timestamp.from(java.time.Instant.now()),java.sql.Timestamp.from(java.time.Instant.now()));
   long attempt=jdbc.queryForObject("SELECT MAX(id) FROM mock_attempts",Long.class);
   jdbc.update("INSERT INTO mock_items(attempt_id,sequence_number,question_id,version_id) VALUES (?,0,?,?)",attempt,mock,m.currentVersion.id);
@@ -402,8 +403,10 @@ class QuestionBankTests extends IsolatedDatabaseSupport {
   assertThat(repository.findById(practice)).isPresent();assertThat(repository.findById(mock)).isPresent();assertThat(repository.findById(imported)).isPresent();
  }
  private long unusedStudentId() {
-  var user=new com.airlineprep.bot.user.BotUser();user.setTelegramUserId(Math.abs(System.nanoTime())+1);user.setRegistrationStatus(com.airlineprep.bot.user.RegistrationStatus.LANGUAGE_REQUIRED);
-  return users.saveAndFlush(user).getId();
+  long sender=Math.abs(System.nanoTime())+1;
+  registration.start(sender);registration.language(sender,"en");registration.exam(sender,exam);
+  registration.contact(sender,sender,"09"+String.format("%08d",sender%100000000));
+  return users.findByTelegramUserId(sender).orElseThrow().getId();
  }
  @Test void confirmationRechecksOtherBatchesAndTaxonomy() throws Exception {
   var m=values("Fictional concurrent");

@@ -72,6 +72,9 @@ async function sendView(chatId, view, telegram) {
         await telegram.sendMessage(chatId, message(language, "registration.exam"), examKeyboard(view.exams, language));
       }
       return;
+    case "EXAM_SWITCH_REQUIRED":
+      await telegram.sendMessage(chatId, message(language, "registration.switchExam"), examKeyboard(view.exams ?? [], language));
+      return;
     case "PHONE_REQUIRED":
       await telegram.sendMessage(chatId, message(language, view.errorKey ?? "registration.phone"), phoneKeyboard(language));
       return;
@@ -172,6 +175,8 @@ export function createTelegramWebhookHandler({ env, store, practice, mock, payme
           await sendView(chatId, await store.language(senderId, data.slice(5)), telegram);
         } else if (/^exam:[1-9][0-9]{0,17}$/.test(data) && BigInt(data.slice(5)) <= LONG_MAX) {
           await sendView(chatId, await store.exam(senderId, data.slice(5)), telegram);
+        } else if (data === "s:exams") {
+          await sendView(chatId, await store.switchExams(senderId), telegram);
         } else if (data === "s:home" || /^m:/.test(data) || /^s:mh:[0-9]{1,6}$/.test(data)) {
           if (mock) await mock.callback(chatId, senderId, data, String(update.update_id));
           else await completedUserNotice(chatId, await store.current(senderId), telegram);
@@ -198,7 +203,7 @@ export function createTelegramWebhookHandler({ env, store, practice, mock, payme
           || messageObject.is_automatic_forward === true;
         const ownerId = !forwarded ? safeId(contact.user_id) : null;
         const view = await store.contact(senderId, ownerId, typeof contact.phone_number === "string" ? contact.phone_number : null);
-        if (view.status === "COMPLETED") {
+        if (view.status === "COMPLETED" && !view.errorKey) {
           const language = view.language === "am" ? "am" : "en";
           await telegram.sendMessage(chatId, message(language, "registration.ready"), { remove_keyboard: true });
         }
@@ -218,8 +223,13 @@ export function createTelegramWebhookHandler({ env, store, practice, mock, payme
           await sendView(chatId, await store.start(senderId), telegram);
         }
       } else if (!command.startsWith("/") && (text.trim() || payment)) {
-        if (payment) await payment.message(chatId, senderId, messageObject, String(update.update_id));
         const phonePrompt = await store.manualPhoneInput(senderId);
+        if (phonePrompt && typeof messageObject?.text === "string" && text.trim()) {
+          await sendView(chatId, await store.manualPhone(senderId, text), telegram);
+          log("info", "manual_phone_checked");
+          return new Response(null, { status: 200 });
+        }
+        if (payment) await payment.message(chatId, senderId, messageObject, String(update.update_id));
         if (phonePrompt) {
           await sendView(chatId, phonePrompt, telegram);
         }

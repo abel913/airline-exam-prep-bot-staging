@@ -35,7 +35,7 @@ public class MockAttemptService {
  public View prepare(long sender,String creationKey) {
   Student s=access.lock(sender);
   if(creationKey==null||!creationKey.matches("[a-zA-Z0-9-]{1,64}")) throw new ExamException("student.invalid");
-  var existing=store.jdbc().query("SELECT * FROM mock_attempts WHERE user_id=? AND creation_key=?",(r,n)->read(r),s.id(),creationKey);
+  var existing=store.jdbc().query("SELECT * FROM mock_attempts WHERE user_id=? AND exam_type_id=? AND creation_key=?",(r,n)->read(r),s.id(),s.examId(),creationKey);
   if(!existing.isEmpty()) return display(s,expire(existing.getFirst()),null,false);
   Attempt current=active(s);
   if(current!=null) {
@@ -125,7 +125,7 @@ public class MockAttemptService {
   if(rows.isEmpty()) throw new ExamException("student.invalid");return rows.getFirst();
  }
  private Attempt active(Student s) {
-  var rows=store.jdbc().query("SELECT * FROM mock_attempts WHERE active_user_id=?",(r,n)->read(r),s.id());
+  var rows=store.jdbc().query("SELECT * FROM mock_attempts WHERE active_user_id=? AND exam_type_id=?",(r,n)->read(r),s.id(),s.examId());
   return rows.isEmpty()?null:rows.getFirst();
  }
  private Attempt own(Student s,long id) {

@@ -18,7 +18,6 @@ function paymentView(v){
  if(v.student.accessLevel==="LIFETIME")text=message(lang,"payment.lifetime");
  else if(!p){
   text=message(lang,v.enabled?"payment.intro":"payment.disabled",v.price,v.currency);
-  if(v.enabled)rows.push([button(lang,"payment.begin","pay:start:"+crypto.randomUUID())]);
  }else{
   text=message(lang,"payment.summary",p.amount,p.currency,message(lang,"payment.status."+p.status));
   if(p.methodId!==null)text+="\n"+[p.methodName,p.accountName,p.destination,p.instructions].filter(Boolean).join("\n");
@@ -44,6 +43,10 @@ function paymentView(v){
  }
  rows.push(...home(lang));return {text,reply_markup:{inline_keyboard:rows}};
 }
+function examView(v){return {text:message(v.language,"payment.chooseExam"),reply_markup:{inline_keyboard:[
+ ...v.exams.map(e=>[{text:`${e.current?"✅ ":""}${v.language==="am"&&e.nameAm?e.nameAm:e.name} — ${message(v.language,"payment.tier."+e.tier)}`,callback_data:"pay:exam:"+e.id}]),
+ home(v.language)[0],
+]}};}
 async function send(telegram,chat,view){
  let text=view.text;while(text.length>3500){let end=3500;if(text.charCodeAt(end-1)>=0xd800&&text.charCodeAt(end-1)<=0xdbff)end--;
   await telegram.sendMessage(chat,text.slice(0,end));text=text.slice(end);}
@@ -55,9 +58,10 @@ export function createPaymentFlow(service,telegram){
    let lang="en";
    try{
     let v=await service.status(tg);lang=v.student.language;
-    if(data==="pay:open"||data==="pay:status"){await send(telegram,chat,paymentView(v));return;}
+    if(data==="pay:open"){await send(telegram,chat,examView(await service.exams(tg)));return;}
+    if(data==="pay:status"){await send(telegram,chat,paymentView(v));return;}
     let m;
-    if((m=/^pay:start:([a-z0-9-]{1,64})$/.exec(data)))v=await service.start(tg,m[1]);
+    if((m=/^pay:exam:([1-9][0-9]{0,17})$/.exec(data)))v=await service.start(tg,m[1],crypto.randomUUID().replaceAll("-",""));
     else if((m=/^pay:method:([1-9][0-9]{0,18}):([1-9][0-9]{0,18})$/.exec(data)))v=await service.select(tg,m[1],m[2]);
     else if((m=/^pay:page:([1-9][0-9]{0,18}):([0-9]{1,6})$/.exec(data)))v=await service.methods(tg,m[1],Number(m[2]));
     else if((m=/^pay:cancel:([1-9][0-9]{0,18})$/.exec(data)))v=await service.cancel(tg,m[1]);

@@ -13,9 +13,9 @@ public class LifetimeGrantService {
  public boolean grant(PaymentRequest request,String admin) {
   settings.lock();
   request.status().require(PaymentStatus.PENDING_REVIEW);
-  var entitlement=grants.findByUserId(request.userId()).orElseThrow();
+  var entitlement=grants.findByUserIdAndExamTypeId(request.userId(),request.examTypeId()).orElseThrow();
   if("LIFETIME".equals(entitlement.getAccessLevel())) return false;
-  store.insert("lifetime_access_grants",ExamStore.values("user_id",request.userId(),"payment_request_id",request.id(),"granted_at",clock.instant(),"granted_by",admin));
+  store.insert("lifetime_access_grants",ExamStore.values("user_id",request.userId(),"exam_type_id",request.examTypeId(),"payment_request_id",request.id(),"granted_at",clock.instant(),"granted_by",admin));
   entitlement.setAccessLevel("LIFETIME");
   // Registration grant fields, snapshots and usage counters retain their historical values.
   audit.append("WEB_ADMIN",admin,"LIFETIME_ACCESS_GRANTED","PAYMENT",request.id(),"provenance=approved-payment");

@@ -23,7 +23,7 @@ class PaymentTelegramTests extends PaymentFixture {
    if(markup.get("inline_keyboard") instanceof List<?> rows) for(Object row:rows) for(Object button:(List<?>)row) buttons.add((String)((Map<?,?>)button).get("callback_data"));return null;
   }).when(client).sendMessage(anyLong(),anyString(),anyMap());
   var ui=new StudentPresenter(client,messages);
-  handler=new TelegramUpdateHandler(client,registration,new RegistrationPresenter(client,messages),new StudentFlow(practice,mocks,progress,ui),new PaymentFlow(payments,ui));
+  handler=new TelegramUpdateHandler(client,registration,new RegistrationPresenter(client,messages),new StudentFlow(practice,mocks,progress,ui),new PaymentFlow(payments,ui,registration));
  }
  void click(String callback) throws Exception {
   texts.clear();buttons.clear();
@@ -37,8 +37,9 @@ class PaymentTelegramTests extends PaymentFixture {
  String button(String prefix) {return buttons.stream().filter(x->x.startsWith(prefix)).findFirst().orElseThrow();}
  @Test void fullUpdateFlowResumeReferencePhotoPendingAndLifetimeMenu() throws Exception {
   message(Map.of("text","/start"));assertThat(buttons).contains("pay:open","pay:status");
-  click("pay:open");assertThat(String.join("",texts)).contains("50.00","administrator");
-  click(button("pay:start:"));click(button("pay:method:"));
+  click("pay:open");assertThat(String.join("",texts)).contains("Which exam");
+  click(button("pay:exam:"));assertThat(String.join("",texts)).contains("50.00","Test support");
+  click(button("pay:method:"));
   long id=payments.status(sender).request().id();
   message(Map.of("text","/help"));assertThat(queries.get(id).status()).isEqualTo(PaymentStatus.AWAITING_REFERENCE);
   message(Map.of("text","/start"));assertThat(buttons).contains("p:menu");click("pay:status");
@@ -46,7 +47,8 @@ class PaymentTelegramTests extends PaymentFixture {
   message(Map.of("photo",List.of(Map.of("file_id","photo","file_unique_id","unique","width",100,"height",100,"file_size",100))));
   assertThat(queries.get(id).status()).isEqualTo(PaymentStatus.PENDING_REVIEW);assertThat(String.join("",texts)).contains("Pending manual review");
   review.approve(id,"test-admin");message(Map.of("text","/start"));assertThat(String.join("",texts)).contains("Unlimited");
-  click("pay:open");assertThat(String.join("",texts)).contains("Lifetime access is active");
+  click("pay:open");assertThat(String.join("",texts)).contains("Which exam");
+  click(button("pay:exam:"));assertThat(String.join("",texts)).contains("Lifetime access is active");
  }
  @Test void forwardedAndUnsupportedAttachmentsDoNotSubmit() throws Exception {
   long id=selected();payments.reference(sender,id,"DEVTEST-FORWARDED");

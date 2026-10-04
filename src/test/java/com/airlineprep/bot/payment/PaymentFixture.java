@@ -17,7 +17,7 @@ public abstract class PaymentFixture extends EngineFixture {
   var f=SettingsForm.from(settings.current());
   settings.update(new SettingsForm(f.freePracticeLimit(),f.freeMockLimit(),f.questionsPerMock(),price,"ETB",enabled,manual,"Test support",f.mockDurationMinutes()),"test-admin");
  }
- protected long selected() {long id=payments.start(sender,UUID.randomUUID().toString()).request().id();payments.select(sender,id,method);return id;}
+ protected long selected() {long id=payments.start(sender,exam,UUID.randomUUID().toString()).request().id();payments.select(sender,id,method);return id;}
  protected ReceiptMetadata receipt(String unique) {return new ReceiptMetadata("test_file",unique,"PHOTO",null,"image/jpeg",100);}
  protected long pending() {long id=selected();payments.reference(sender,id,"DEVTEST-"+UUID.randomUUID());payments.receipt(sender,id,receipt("unique_"+id));return id;}
 }

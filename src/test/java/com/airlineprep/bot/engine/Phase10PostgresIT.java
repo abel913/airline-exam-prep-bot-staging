@@ -39,8 +39,8 @@ class Phase10PostgresIT {
    var a=mocks.prepare(sender,"large");mocks.open(sender,a.attempt().id(),0,false);mocks.answer(sender,a.attempt().id(),0,0,0);mocks.submit(sender,a.attempt().id());
    // Large repeat history is fixture data inside this rolled-back isolated transaction.
    jdbc.update("""
-    INSERT INTO practice_deliveries(user_id,question_id,version_id,selected_option,created_at,answered_at)
-    SELECT d.user_id,d.question_id,d.version_id,0,CURRENT_TIMESTAMP,CURRENT_TIMESTAMP
+    INSERT INTO practice_deliveries(user_id,exam_type_id,question_id,version_id,selected_option,created_at,answered_at)
+    SELECT d.user_id,d.exam_type_id,d.question_id,d.version_id,0,CURRENT_TIMESTAMP,CURRENT_TIMESTAMP
     FROM practice_deliveries d CROSS JOIN generate_series(1,200) n WHERE d.id=(SELECT MIN(id) FROM practice_deliveries WHERE user_id=d.user_id)
      AND d.user_id=(SELECT id FROM bot_users WHERE telegram_user_id=?)
     """,sender);

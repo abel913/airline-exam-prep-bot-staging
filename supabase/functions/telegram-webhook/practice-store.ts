@@ -72,7 +72,7 @@ export class PracticeUnitOfWork {
       mocks_used: number; questions_per_mock: number;
     }>`
       SELECT access_level, practice_limit, practice_used, mock_limit, mocks_used, questions_per_mock
-      FROM access_entitlements WHERE user_id = ${String(user.id)}
+      FROM access_entitlements WHERE user_id = ${String(user.id)} AND exam_type_id = ${String(user.selected_exam_type_id)}
     `;
     const grant = grants.rows[0];
     if (!grant || !["FREE", "LIFETIME"].includes(grant.access_level)) return null;
@@ -132,14 +132,14 @@ export class PracticeUnitOfWork {
   async currentDelivery(student: PracticeStudent): Promise<PracticeDelivery | null> {
     const result = await this.client.queryObject<Record<string, unknown>>`
       SELECT d.* FROM practice_sessions p JOIN practice_deliveries d ON d.id = p.current_delivery_id
-      WHERE p.user_id = ${student.id}
+      WHERE p.user_id = ${student.id} AND p.exam_type_id = ${student.examId}
     `;
     return result.rows[0] ? readDelivery(result.rows[0]) : null;
   }
 
   async used(student: PracticeStudent, questionId: string): Promise<boolean> {
     const result = await this.client.queryObject<{ found: boolean }>`
-      SELECT EXISTS(SELECT 1 FROM practice_usage WHERE user_id = ${student.id} AND question_id = ${questionId}) AS found
+      SELECT EXISTS(SELECT 1 FROM practice_usage WHERE user_id = ${student.id} AND exam_type_id = ${student.examId} AND question_id = ${questionId}) AS found
     `;
     return result.rows[0]?.found === true;
   }
@@ -153,9 +153,9 @@ export class PracticeUnitOfWork {
         JOIN categories c ON c.id = v.category_id AND c.exam_type_id = e.id
         WHERE q.status = 'PUBLISHED' AND e.active = TRUE AND c.active = TRUE AND e.id = ${student.examId}
           AND (v.free_pool = TRUE OR (${student.accessLevel === "LIFETIME"} = TRUE AND v.premium_pool = TRUE))
-          AND ${review} = EXISTS(SELECT 1 FROM practice_usage u WHERE u.user_id = ${student.id} AND u.question_id = q.id)
+          AND ${review} = EXISTS(SELECT 1 FROM practice_usage u WHERE u.user_id = ${student.id} AND u.exam_type_id = ${student.examId} AND u.question_id = q.id)
         ORDER BY COALESCE((SELECT MAX(d.id) FROM practice_deliveries d
-          WHERE d.user_id = ${student.id} AND d.question_id = q.id), 0), q.id LIMIT 1
+          WHERE d.user_id = ${student.id} AND d.exam_type_id = ${student.examId} AND d.question_id = q.id), 0), q.id LIMIT 1
       `
       : await this.client.queryObject<{ id: string | bigint }>`
         SELECT v.id FROM questions q JOIN question_versions v ON v.id = q.current_version_id
@@ -164,9 +164,9 @@ export class PracticeUnitOfWork {
         WHERE q.status = 'PUBLISHED' AND e.active = TRUE AND c.active = TRUE AND e.id = ${student.examId}
           AND c.id = ${categoryId}
           AND (v.free_pool = TRUE OR (${student.accessLevel === "LIFETIME"} = TRUE AND v.premium_pool = TRUE))
-          AND ${review} = EXISTS(SELECT 1 FROM practice_usage u WHERE u.user_id = ${student.id} AND u.question_id = q.id)
+          AND ${review} = EXISTS(SELECT 1 FROM practice_usage u WHERE u.user_id = ${student.id} AND u.exam_type_id = ${student.examId} AND u.question_id = q.id)
         ORDER BY COALESCE((SELECT MAX(d.id) FROM practice_deliveries d
-          WHERE d.user_id = ${student.id} AND d.question_id = q.id), 0), q.id LIMIT 1
+          WHERE d.user_id = ${student.id} AND d.exam_type_id = ${student.examId} AND d.question_id = q.id), 0), q.id LIMIT 1
       `;
     return result.rows[0] ? String(result.rows[0].id) : null;
   }
@@ -199,8 +199,8 @@ export class PracticeUnitOfWork {
     const questionId = version.rows[0] ? String(version.rows[0].question_id) : null;
     if (questionId === null) throw new Error("STUDENT_INVALID");
     const inserted = await this.client.queryObject<Record<string, unknown>>`
-      INSERT INTO practice_deliveries (user_id, question_id, version_id, category_filter, created_at)
-      VALUES (${student.id}, ${questionId}, ${versionId}, ${categoryId}, CURRENT_TIMESTAMP)
+      INSERT INTO practice_deliveries (user_id, exam_type_id, question_id, version_id, category_filter, created_at)
+      VALUES (${student.id}, ${student.examId}, ${questionId}, ${versionId}, ${categoryId}, CURRENT_TIMESTAMP)
       RETURNING *
     `;
     const delivery = inserted.rows[0];
@@ -218,8 +218,8 @@ export class PracticeUnitOfWork {
 
   async setCurrentDelivery(student: PracticeStudent, id: string): Promise<void> {
     await this.client.queryArray`
-      INSERT INTO practice_sessions (user_id, current_delivery_id) VALUES (${student.id}, ${id})
-      ON CONFLICT (user_id) DO UPDATE SET current_delivery_id = EXCLUDED.current_delivery_id
+      INSERT INTO practice_sessions (user_id, exam_type_id, current_delivery_id) VALUES (${student.id}, ${student.examId}, ${id})
+      ON CONFLICT (user_id) DO UPDATE SET exam_type_id = EXCLUDED.exam_type_id, current_delivery_id = EXCLUDED.current_delivery_id
     `;
   }
 
@@ -231,9 +231,9 @@ export class PracticeUnitOfWork {
     `;
     if (!updated.rows.length) return { usageCreated: false, practiceUsed: student.practiceUsed };
     const usage = await this.client.queryObject<{ question_id: string | bigint }>`
-      INSERT INTO practice_usage (user_id, question_id, first_delivery_id, created_at)
-      VALUES (${student.id}, ${delivery.questionId}, ${delivery.id}, CURRENT_TIMESTAMP)
-      ON CONFLICT (user_id, question_id) DO NOTHING
+      INSERT INTO practice_usage (user_id, exam_type_id, question_id, first_delivery_id, created_at)
+      VALUES (${student.id}, ${student.examId}, ${delivery.questionId}, ${delivery.id}, CURRENT_TIMESTAMP)
+      ON CONFLICT (user_id, exam_type_id, question_id) DO NOTHING
       RETURNING question_id
     `;
     if (!usage.rows.length || student.accessLevel === "LIFETIME") {
@@ -241,7 +241,7 @@ export class PracticeUnitOfWork {
     }
     const counter = await this.client.queryObject<{ practice_used: number }>`
       UPDATE access_entitlements SET practice_used = practice_used + 1, updated_at = CURRENT_TIMESTAMP
-      WHERE user_id = ${student.id} AND access_level = 'FREE' RETURNING practice_used
+      WHERE user_id = ${student.id} AND exam_type_id = ${student.examId} AND access_level = 'FREE' RETURNING practice_used
     `;
     if (!counter.rows.length) throw new Error("PRACTICE_ENTITLEMENT_UPDATE_FAILED");
     return { usageCreated: true, practiceUsed: Number(counter.rows[0].practice_used) };
@@ -312,13 +312,13 @@ export class PracticeUnitOfWork {
         WHERE q.status = 'PUBLISHED' AND c.active = TRUE AND e.active = TRUE AND c.exam_type_id = e.id
           AND cv.category_id = v.category_id AND cv.exam_type_id = ${student.examId}
           AND (cv.free_pool = TRUE OR (${student.accessLevel === "LIFETIME"} = TRUE AND cv.premium_pool = TRUE))
-          AND NOT EXISTS (SELECT 1 FROM practice_usage used WHERE used.user_id = ${student.id} AND used.question_id = q.id)
+          AND NOT EXISTS (SELECT 1 FROM practice_usage used WHERE used.user_id = ${student.id} AND used.exam_type_id = ${student.examId} AND used.question_id = q.id)
       )
       GROUP BY v.category_id
       HAVING COUNT(*) >= 5 AND SUM(CASE WHEN o.correct THEN 1 ELSE 0 END) * 100.0 / COUNT(*) < 60
       ORDER BY COALESCE((SELECT MAX(recent.id) FROM practice_deliveries recent
         JOIN question_versions rv ON rv.id = recent.version_id
-        WHERE recent.user_id = ${student.id} AND rv.category_id = v.category_id), 0), v.category_id LIMIT 1
+        WHERE recent.user_id = ${student.id} AND recent.exam_type_id = ${student.examId} AND rv.category_id = v.category_id), 0), v.category_id LIMIT 1
     `;
     return rows.rows[0] ? String(rows.rows[0].category_id) : null;
   }

@@ -58,6 +58,7 @@ public class TelegramUpdateHandler {
                     show(chatId, registration.language(senderId, data.substring(5)));
                 else if (data.matches("exam:[1-9][0-9]{0,17}"))
                     show(chatId, registration.exam(senderId, Long.parseLong(data.substring(5))));
+                else if (data.equals("s:exams")) presenter.show(chatId, registration.switchExams(senderId));
                 else if(data.startsWith("s:")||data.startsWith("p:")||data.startsWith("m:"))
                     students.callback(senderId,data);
                 else if(data.startsWith("pay:")&&payments!=null) payments.callback(senderId,data);
@@ -72,7 +73,7 @@ public class TelegramUpdateHandler {
                 var contact = message.path("contact");
                 var result=registration.contact(senderId,
                     positiveId(contact.path("user_id")), contact.path("phone_number").asText(null));
-                if(result.status()==com.airlineprep.bot.user.RegistrationStatus.COMPLETED) presenter.removeContactKeyboard(chatId,result.language());
+                if(result.status()==com.airlineprep.bot.user.RegistrationStatus.COMPLETED && result.errorKey()==null) presenter.removeContactKeyboard(chatId,result.language());
                 show(chatId,result);
                 log.debug("Telegram contact update handled");
                 return;
@@ -84,8 +85,12 @@ public class TelegramUpdateHandler {
                 show(chatId, registration.start(senderId));
                 log.debug("Telegram registration step sent");
             } else if(!command.startsWith("/")) {
+                var phonePrompt = registration.manualPhoneInput(senderId);
+                if (phonePrompt.isPresent() && message.path("text").isTextual() && !text.isBlank()) {
+                    show(chatId, registration.manualPhone(senderId, text));
+                    return;
+                }
                 if (message.path("text").isTextual() && !text.isBlank()) {
-                    var phonePrompt = registration.manualPhoneInput(senderId);
                     if (phonePrompt.isPresent()) {
                         presenter.show(chatId, phonePrompt.get());
                         return;

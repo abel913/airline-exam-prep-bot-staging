@@ -24,7 +24,10 @@ public abstract class EngineFixture extends com.airlineprep.bot.IsolatedDatabase
   registration.contact(sender,sender,"09"+String.format("%08d",number));
   var entitlement=grant();entitlement.setQuestionsPerMock(mockSize);grants.saveAndFlush(entitlement);
  }
- protected AccessEntitlement grant() { return grants.findByUserId(users.findByTelegramUserId(sender).orElseThrow().getId()).orElseThrow(); }
+ protected AccessEntitlement grant() {
+  var user=users.findByTelegramUserId(sender).orElseThrow();
+  return grants.findByUserIdAndExamTypeId(user.getId(),user.getSelectedExamTypeId()).orElseThrow();
+ }
  protected QuestionForm form(String text,boolean free,boolean premium,boolean mock) {
   var f=new QuestionForm();f.setExamTypeId(exam);f.setCategoryId(category);f.setQuestionText(text);
   f.setExplanation("Fictional explanation, not real exam content.");f.setDifficulty(Difficulty.EASY);

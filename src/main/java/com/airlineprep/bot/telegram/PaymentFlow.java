@@ -5,15 +5,20 @@ import com.airlineprep.bot.common.ExamException;
 import com.fasterxml.jackson.databind.JsonNode;
 public class PaymentFlow {
  private final PaymentService payments;private final StudentPresenter ui;
- public PaymentFlow(PaymentService p,StudentPresenter ui) {payments=p;this.ui=ui;}
+ private final com.airlineprep.bot.user.RegistrationService registration;
+ public PaymentFlow(PaymentService p,StudentPresenter ui,com.airlineprep.bot.user.RegistrationService r) {payments=p;this.ui=ui;registration=r;}
  public void callback(long sender,String data) throws InterruptedException {
   String lang="en";
   try {
    var v=payments.status(sender);lang=v.student().language();
-   if(data==null||data.length()>64||!data.matches("pay:(open|status)|pay:start:[a-z0-9-]+|pay:(method|page):[0-9]+:[0-9]+|pay:cancel:[0-9]+")) throw new ExamException("student.invalid");
-   if(data.equals("pay:open")||data.equals("pay:status")) {show(sender,v);return;}
+   if(data==null||data.length()>64||!data.matches("pay:(open|status)|pay:exam:[1-9][0-9]{0,17}|pay:(method|page):[0-9]+:[0-9]+|pay:cancel:[0-9]+")) throw new ExamException("student.invalid");
+   if(data.equals("pay:open")) {ui.purchaseExamSelector(sender,v.student().language(),registration.purchaseExams(sender));return;}
+   if(data.equals("pay:status")) {show(sender,v);return;}
+   if(data.startsWith("pay:exam:")) {
+    long exam=Long.parseLong(data.substring(9));
+    show(sender,payments.start(sender,exam,UUID.randomUUID().toString().replace("-","")));return;
+   }
    String[] parts=data.split(":");if(parts.length<3) return;
-   if(parts[1].equals("start")&&parts.length==3) {show(sender,payments.start(sender,parts[2]));return;}
    long id=Long.parseLong(parts[2]);
    switch(parts[1]) {
     case "method" -> {if(parts.length==4) show(sender,payments.select(sender,id,Long.parseLong(parts[3])));}
@@ -59,7 +64,6 @@ public class PaymentFlow {
   if(v.student().lifetime()) text=ui.message(lang,"payment.lifetime");
   else if(p==null) {
    text=ui.message(lang,v.enabled()?"payment.intro":"payment.disabled",v.price().toPlainString(),v.currency());
-   if(v.enabled()) rows.add(List.of(ui.button(lang,"payment.begin","pay:start:"+UUID.randomUUID().toString().replace("-",""))));
   } else {
    text=ui.message(lang,"payment.summary",p.amount().toPlainString(),p.currency(),ui.message(lang,"payment.status."+p.status()));
    if(p.methodId()!=null) text+="\n"+p.methodName()+"\n"+p.accountName()+"\n"+p.destination()+"\n"+p.instructions();

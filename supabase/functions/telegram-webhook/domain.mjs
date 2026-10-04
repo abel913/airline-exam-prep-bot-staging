@@ -3,12 +3,12 @@ const EN = {
   "registration.exam": "Choose the exam type you are preparing for.",
   "registration.noExams": "Registration configuration is temporarily unavailable. Please try /start later.",
   "registration.examUnavailable": "That exam type is no longer available. Please choose another.",
-  "registration.phone": "📱 PHONE NUMBER VERIFICATION\n\nTo continue registration, share the phone number\nconnected to YOUR Telegram account.\n\n👇 TAP THE BUTTON BELOW 👇\n\nDo not type your phone number manually.",
+  "registration.phone": "Enter your phone number or tap Share Phone Number below.",
   "registration.share": "👉 📲 SHARE MY PHONE NUMBER 👈",
   "registration.ownContact": "⚠️ This is not your Telegram-linked phone number.\n\nPlease use the button below to share your own number.\n\n👇 TAP THE BUTTON BELOW 👇",
-  "registration.manualPhone": "⚠️ Please don't type your phone number.\n\nFor security, use the button below so Telegram can verify that the number belongs to you.\n\n👇 TAP THE BUTTON BELOW 👇",
+  "registration.manualPhone": "Enter your Ethiopian phone number or share your own Telegram contact below.",
   "registration.invalidPhone": "A valid Ethiopian mobile number is required.",
-  "registration.duplicatePhone": "This phone number has already been used for registration. Please contact support if you need help.",
+  "registration.duplicatePhone": "This phone number is already associated with another account. Use your own Telegram contact or contact support.",
   "registration.unavailable": "Registration is temporarily unavailable. Please try again later.",
   "registration.retry": "Service temporarily unavailable. Please send /start to retry.",
   "maintenance.message": "The service is temporarily unavailable for maintenance. Please try again later.",
@@ -18,6 +18,9 @@ const EN = {
   "student.progress": "Progress",
   "student.help": "Help",
   "student.menu": "Menu",
+  "student.switchExam": "Switch Exam",
+  "student.currentExam": "Current Exam: {0}",
+  "registration.switchExam": "Choose an active exam. Your previous progress remains saved.",
   "student.previous": "Previous",
   "student.next": "Next",
   "student.remaining": "{0} remaining of {1}",
@@ -53,6 +56,9 @@ const EN = {
   "progress.category": "{0}: {1}/{2} first answers correct ({3}%)",
   "progress.mock": "Mock #{0}: {1}/{2} ({3}%)",
   "payment.upgrade": "Upgrade / Lifetime Access",
+  "payment.chooseExam": "Which exam would you like to upgrade?",
+  "payment.tier.FREE": "Free",
+  "payment.tier.LIFETIME": "Lifetime",
   "payment.activeButton": "Lifetime Access Active",
   "payment.statusButton": "Payment status",
   "payment.begin": "Start payment request",
@@ -113,12 +119,12 @@ const AM = {
   "registration.exam": "የሚዘጋጁበትን የፈተና አይነት ይምረጡ።",
   "registration.noExams": "ምዝገባ ለጊዜው አይገኝም። እባክዎ በኋላ /start ብለው ይሞክሩ።",
   "registration.examUnavailable": "ይህ የፈተና አይነት ለጊዜው አይገኝም። ሌላ ይምረጡ።",
-  "registration.phone": "📱 የስልክ ቁጥር ማረጋገጫ\n\nምዝገባውን ለመቀጠል ከራስዎ የቴሌግራም መለያ ጋር\nየተገናኘውን የኢትዮጵያ ሞባይል ቁጥር ያጋሩ።\n\n👇 ከታች ያለውን አዝራር ይጫኑ 👇\n\nየስልክ ቁጥርዎን በጽሑፍ አይላኩ።",
+  "registration.phone": "የኢትዮጵያ ስልክ ቁጥርዎን ያስገቡ ወይም ከታች ያለውን የስልክ ቁጥር አጋራ ቁልፍ ይጫኑ።",
   "registration.share": "👉 📲 የራሴን ስልክ ቁጥር አጋራ 👈",
   "registration.ownContact": "⚠️ ይህ ከራስዎ የቴሌግራም መለያ ጋር የተገናኘው የስልክ ቁጥር አይደለም።\n\nእባክዎ የራስዎን ቁጥር ለማጋራት ከታች ያለውን አዝራር ይጠቀሙ።\n\n👇 ከታች ያለውን አዝራር ይጫኑ 👇",
-  "registration.manualPhone": "⚠️ እባክዎ የስልክ ቁጥርዎን በጽሑፍ አይላኩ።\n\nለደህንነትዎ፣ ቴሌግራም ቁጥሩ የእርስዎ መሆኑን እንዲያረጋግጥ ከታች ያለውን አዝራር ይጠቀሙ።\n\n👇 ከታች ያለውን አዝራር ይጫኑ 👇",
+  "registration.manualPhone": "የኢትዮጵያ ስልክ ቁጥርዎን ያስገቡ ወይም የራስዎን የቴሌግራም እውቂያ ያጋሩ።",
   "registration.invalidPhone": "ትክክለኛ የኢትዮጵያ ሞባይል ቁጥር ያስፈልጋል።",
-  "registration.duplicatePhone": "ይህ ስልክ ቁጥር ከዚህ በፊት ለምዝገባ ውሏል። እርዳታ ከፈለጉ ድጋፍ ያግኙ።",
+  "registration.duplicatePhone": "ይህ ስልክ ቁጥር ከሌላ መለያ ጋር ተያይዟል። የራስዎን የቴሌግራም እውቂያ ይጠቀሙ ወይም ድጋፍ ያግኙ።",
   "registration.unavailable": "ምዝገባ ለጊዜው አይገኝም። እባክዎ በኋላ ይሞክሩ።",
   "registration.retry": "አገልግሎቱ ለጊዜው አይገኝም። /start ብለው እንደገና ይሞክሩ።",
   "maintenance.message": "አገልግሎቱ ለጥገና ስራ ለጊዜው አይገኝም። እባክዎ በኋላ ይሞክሩ።",
@@ -128,6 +134,9 @@ const AM = {
   "student.progress": "እድገት",
   "student.help": "እርዳታ",
   "student.menu": "ምናሌ",
+  "student.switchExam": "ፈተና ቀይር",
+  "student.currentExam": "የአሁኑ ፈተና፦ {0}",
+  "registration.switchExam": "ንቁ የሆነ ፈተና ይምረጡ። ያለፈው ውጤትዎ ይቀመጣል።",
   "student.previous": "ወደ ኋላ",
   "student.next": "ቀጣይ",
   "student.remaining": "ከ {1} ውስጥ {0} ቀርቷል",
@@ -163,6 +172,9 @@ const AM = {
   "progress.category": "{0}፦ {1}/{2} የመጀመሪያ መልሶች ትክክል ({3}%)",
   "progress.mock": "ፈተና #{0}፦ {1}/{2} ({3}%)",
   "payment.upgrade": "የዕድሜ ልክ መዳረሻ",
+  "payment.chooseExam": "የትኛውን ፈተና ማሻሻል ይፈልጋሉ?",
+  "payment.tier.FREE": "ነፃ",
+  "payment.tier.LIFETIME": "የዕድሜ ልክ",
   "payment.activeButton": "የዕድሜ ልክ መዳረሻ ንቁ ነው",
   "payment.statusButton": "የክፍያ ሁኔታ",
   "payment.begin": "የክፍያ ጥያቄ ጀምር",
@@ -292,7 +304,7 @@ export function phoneKeyboard(language) {
 
 export function examKeyboard(exams, language) {
   return { inline_keyboard: exams.map((exam) => [{
-    text: language === "am" && exam.nameAm?.trim() ? exam.nameAm : exam.name,
+    text: `${exam.current ? "✅ " : ""}${language === "am" && exam.nameAm?.trim() ? exam.nameAm : exam.name}`,
     callback_data: `exam:${exam.id}`,
   }]) };
 }
@@ -316,9 +328,11 @@ export function completedMenu(view) {
     [button(language, "history.practice", "s:ph:0"), button(language, "history.mock", "s:mh:0")],
     [button(language, "insights.title", "s:weak:0"), button(language, "insights.practice", "s:recommend")],
     [button(language, grant.accessLevel === "LIFETIME" ? "payment.activeButton" : "payment.upgrade", "pay:open"), button(language, "payment.statusButton", "pay:status")],
+    [button(language, "student.switchExam", "s:exams")],
   ];
   if (view.grant.activeMockId) rows.push([button(language, "mock.resume", `m:o:${view.grant.activeMockId}:-1`)]);
-  return { text: message(language, "student.welcome", practice, mocks), reply_markup: { inline_keyboard: rows } };
+  const examName = language === "am" && view.examNameAm ? view.examNameAm : view.examName;
+  return { text: message(language, "student.currentExam", examName ?? "")+"\n\n"+message(language, "student.welcome", practice, mocks), reply_markup: { inline_keyboard: rows } };
 }
 
 export function requiredConfiguration(env) {
