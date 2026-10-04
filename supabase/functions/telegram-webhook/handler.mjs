@@ -105,7 +105,7 @@ function updateType(update) {
   return "other";
 }
 
-export function createTelegramWebhookHandler({ env, store, practice, telegram, logger = console }) {
+export function createTelegramWebhookHandler({ env, store, practice, mock, payment, telegram, logger = console }) {
   return async function handleRequest(request) {
     if (request.method === "GET") {
       const config = requiredConfiguration(env);
@@ -172,7 +172,13 @@ export function createTelegramWebhookHandler({ env, store, practice, telegram, l
           await sendView(chatId, await store.language(senderId, data.slice(5)), telegram);
         } else if (/^exam:[1-9][0-9]{0,17}$/.test(data) && BigInt(data.slice(5)) <= LONG_MAX) {
           await sendView(chatId, await store.exam(senderId, data.slice(5)), telegram);
-        } else if (/^(?:p:|s:(?:home|help|progress|ph:[0-9]{1,6}|weak:[0-9]{1,6}|recommend)$)/.test(data)) {
+        } else if (data === "s:home" || /^m:/.test(data) || /^s:mh:[0-9]{1,6}$/.test(data)) {
+          if (mock) await mock.callback(chatId, senderId, data, String(update.update_id));
+          else await completedUserNotice(chatId, await store.current(senderId), telegram);
+        } else if (/^pay:/.test(data)) {
+          if (payment) await payment.callback(chatId, senderId, data, String(update.update_id));
+          else await completedUserNotice(chatId, await store.current(senderId), telegram);
+        } else if (/^(?:p:|s:(?:help|progress|ph:[0-9]{1,6}|weak:[0-9]{1,6}|recommend)$)/.test(data)) {
           if (practice) {
             await practice.callback(chatId, senderId, data, String(update.update_id));
           } else {
@@ -211,7 +217,8 @@ export function createTelegramWebhookHandler({ env, store, practice, telegram, l
           && requestedUsername.toLowerCase() === (await telegram.getBotUsername()).toLowerCase()) {
           await sendView(chatId, await store.start(senderId), telegram);
         }
-      } else if (!command.startsWith("/") && text.trim()) {
+      } else if (!command.startsWith("/") && (text.trim() || payment)) {
+        if (payment) await payment.message(chatId, senderId, messageObject, String(update.update_id));
         const phonePrompt = await store.manualPhoneInput(senderId);
         if (phonePrompt) {
           await sendView(chatId, phonePrompt, telegram);

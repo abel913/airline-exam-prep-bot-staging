@@ -176,6 +176,27 @@ test("practice callbacks use the Edge practice flow with Telegram update ID", as
   assert.deepEqual(telegram.calls[0], ["ack", "practice-callback"]);
 });
 
+test("mock and payment updates route to their Edge flows without using the Spring bot path", async () => {
+  const store=fakeStore(),telegram=fakeTelegram(),mockCalls=[],paymentCalls=[],practiceCalls=[];
+  store.manualPhoneInput=async()=>null;
+  const mock={async callback(...args){mockCalls.push(args);}};
+  const payment={async callback(...args){paymentCalls.push(["callback",...args]);},async message(...args){paymentCalls.push(["message",...args]);}};
+  const practice={async callback(...args){practiceCalls.push(args);}};
+  const handler=createTelegramWebhookHandler({env,store,telegram,mock,payment,practice});
+  const callback=(update_id,data)=>({update_id,callback_query:{id:"cb-"+update_id,data,from:{id:77},message:{chat:{id:77,type:"private"}}}});
+  assert.equal((await handler(makeRequest(callback(201,"m:intro")))).status,200);
+  assert.equal((await handler(makeRequest(callback(202,"s:mh:0")))).status,200);
+  assert.equal((await handler(makeRequest(callback(203,"pay:status")))).status,200);
+  assert.equal((await handler(makeRequest(callback(204,"s:progress")))).status,200);
+  assert.deepEqual(mockCalls.map(x=>x[2]),["m:intro","s:mh:0"]);
+  assert.deepEqual(paymentCalls[0],["callback","77","77","pay:status","203"]);
+  assert.deepEqual(practiceCalls,[["77","77","s:progress","204"]]);
+  const receipt={update_id:205,message:{from:{id:77},chat:{id:77,type:"private"},photo:[{file_id:"f",file_unique_id:"u",width:2,height:2,file_size:10}]}};
+  assert.equal((await handler(makeRequest(receipt))).status,200);
+  assert.equal(paymentCalls.at(-1)[0],"message");
+  assert.equal(paymentCalls.at(-1).at(-1),"205");
+});
+
 test("rejects malformed updates and ignores non-private messages", async () => {
   const store = fakeStore();
   const handler = createTelegramWebhookHandler({ env, store, telegram: fakeTelegram() });

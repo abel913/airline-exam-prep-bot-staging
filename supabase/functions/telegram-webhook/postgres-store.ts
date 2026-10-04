@@ -109,6 +109,10 @@ export class PostgresRegistrationStore {
         practiceUsed: found.practice_used,
         mocksUsed: found.mocks_used,
       };
+      const activeMock = await client.queryObject<{ id: string | bigint }>`
+        SELECT id FROM mock_attempts WHERE active_user_id = ${String(user.id)}
+      `;
+      grant.activeMockId = activeMock.rows[0] ? String(activeMock.rows[0].id) : null;
     }
     return { status, language, exams, errorKey, grant };
   }

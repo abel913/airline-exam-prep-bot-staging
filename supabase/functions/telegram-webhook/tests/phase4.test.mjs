@@ -1,0 +1,178 @@
+import test from "node:test";
+import assert from "node:assert/strict";
+import { MockError, MockService } from "../mock-service.mjs";
+import { PaymentError, PaymentService } from "../payment-service.mjs";
+import { createMockFlow } from "../mock-flow.mjs";
+import { message } from "../domain.mjs";
+
+function fixture({duration=2,questions=2,limit=2}={}){
+  const state={now:1000000,next:1,attempts:new Map(),items:new Map(),used:0,limit,duration,
+    active:null,studentId:"10",foreignId:"20"};
+  const question=(id)=>({id:String(id),versionId:"v"+id,examId:"1",categoryId:"3",categoryName:"Synthetic",
+    text:"Synthetic question "+id,explanation:"Original explanation",options:[
+      {position:0,text:"Correct",correct:true},{position:1,text:"Incorrect",correct:false}]});
+  const versions=new Map([[1,question(1)],[2,question(2)],[3,question(3)]]);
+  const student=(id=state.studentId)=>({id,telegramId:id,examId:"1",language:"en",accessLevel:"FREE",
+    practiceLimit:100,practiceUsed:0,mockLimit:limit,mocksUsed:state.used,questionsPerMock:questions});
+  const unit={
+    async student(tg){return tg==="tg"?student():tg==="other"?student(state.foreignId):null;},
+    async duration(){return state.duration;},
+    async own(s,id){const a=state.attempts.get(String(id));return a&&a.user_id===s.id?a:null;},
+    async active(s){return [...state.attempts.values()].find(a=>a.active_user_id===s.id)??null;},
+    async creation(s,key){return [...state.attempts.values()].find(a=>a.user_id===s.id&&a.creation_key===key)??null;},
+    async eligible(_s,count){return Array.from({length:Math.min(count,3)},(_,i)=>({question_id:String(i+1),version_id:"v"+(i+1)}));},
+    async create(s,key,duration){const id=String(state.next++),a={id,user_id:s.id,exam_type_id:s.examId,status:"READY",
+      active_user_id:s.id,creation_key:key,question_count:questions,duration_minutes:duration,cursor_position:0,
+      started_at:null,deadline_at:null,first_answer_at:null,submitted_at:null,correct_count:null,incorrect_count:null,unanswered_count:null};
+      state.attempts.set(id,a);state.items.set(id,[]);state.active=id;return id;},
+    async freeze(a,selected){state.items.get(a).push(...selected.map((x,i)=>({sequence_number:i,version_id:x.version_id,
+      selected_option:null,answer_revision:0,question_id:x.question_id})) );},
+    async items(a){return state.items.get(a).map(x=>({...x}));},
+    async item(a,seq){const i=state.items.get(a)?.find(x=>x.sequence_number===seq);return i?{...i}:null;},
+    async frozen(v){const n=Number(String(v).slice(1));return versions.get(n)??null;},
+    async expired(a){const x=state.attempts.get(a);return x.deadline_at!==null&&state.now>=x.deadline_at;},
+    async secondsRemaining(a){const x=state.attempts.get(a);return x.deadline_at===null?null:Math.max(0,Math.floor((x.deadline_at-state.now)/1000));},
+    async open(id){const a=state.attempts.get(id);if(a.status==="READY"){a.status="IN_PROGRESS";a.started_at=state.now;
+      a.deadline_at=a.duration_minutes===null?null:state.now+a.duration_minutes*60000;}},
+    async answer(s,a,seq,opt,rev){const x=state.attempts.get(a),i=state.items.get(a).find(z=>z.sequence_number===seq);
+      if(!i||i.answer_revision!==rev)return false;
+      if(x.first_answer_at===null){if(s.accessLevel!=="LIFETIME"){if(state.used>=state.limit)throw new Error("MOCK_LIMIT");state.used++;}
+        x.first_answer_at=state.now;}
+      i.selected_option=opt;i.answer_revision++;return true;},
+    async move(a,seq){state.attempts.get(a).cursor_position=seq;},
+    async score(a){const items=state.items.get(a),categories=[{id:"3",name:"Synthetic",total:items.length,
+      correct:items.filter(i=>i.selected_option===0).length,incorrect:items.filter(i=>i.selected_option===1).length,
+      unanswered:items.filter(i=>i.selected_option===null).length}];
+      return {total:items.length,correct:categories[0].correct,incorrect:categories[0].incorrect,unanswered:categories[0].unanswered,categories};},
+    async finish(a,status,score){const x=state.attempts.get(String(a.id));x.status=status;x.active_user_id=null;x.submitted_at=state.now;
+      x.correct_count=score.correct;x.incorrect_count=score.incorrect;x.unanswered_count=score.unanswered;},
+    async history(s){return {rows:[...state.attempts.values()].filter(a=>a.user_id===s.id).map(a=>({id:a.id,status:a.status,
+      date:new Date(a.created_at??state.now).toISOString(),total:a.question_count,correct:a.correct_count,
+      incorrect:a.incorrect_count,unanswered:a.unanswered_count,hasAnswers:a.first_answer_at!==null})),more:false};},
+  };
+  let tail=Promise.resolve();
+  const store={async withAction(fn){const prior=tail;let release;tail=new Promise(r=>release=r);await prior;
+    try{return await fn(unit);}finally{release();}}};
+  return {state,student,service:new MockService(store)};
+}
+function paymentFixture({paymentEnabled=true,manualEnabled=true}={}){
+ const state={requests:new Map(),next:1,refs:new Set(),notifications:[],methods:[{id:"1",type:"BANK_TRANSFER",
+  display_name:"Staging Test Transfer",account_name:"TEST ONLY",destination:"NO REAL DESTINATION",
+  instructions:"Synthetic staging instructions",active:true}],students:new Map([
+   ["tg",{id:"10",telegramId:"10",examId:"1",language:"en",accessLevel:"FREE",practiceLimit:10,practiceUsed:0,mockLimit:2,mocksUsed:0,questionsPerMock:5}],
+   ["tg2",{id:"11",telegramId:"11",examId:"1",language:"en",accessLevel:"FREE",practiceLimit:10,practiceUsed:0,mockLimit:2,mocksUsed:0,questionsPerMock:5}],
+  ])};
+ const unit={
+  async student(tg){return state.students.get(tg)??null;},
+  async config(){return{payment_enabled:paymentEnabled,manual_payment_enabled:manualEnabled,lifetime_price:"123.45",currency:"ETB",support_info:""};},
+  async request(id,user){const r=state.requests.get(String(id));return r&&r.user_id===user?r:null;},
+  async open(user){return [...state.requests.values()].find(r=>r.open_user_id===user)??null;},
+  async creation(user,key){return [...state.requests.values()].find(r=>r.user_id===user&&r.creation_key===key)??null;},
+  async history(user){return [...state.requests.values()].filter(r=>r.user_id===user);},
+  async methods(){return state.methods.filter(m=>m.active);},
+  async method(id){return state.methods.find(m=>m.id===String(id))??null;},
+  async create(s,key,c){const id=String(state.next++),r={id,user_id:s.id,open_user_id:s.id,creation_key:key,status:"SELECT_METHOD",
+   amount:c.lifetime_price,currency:c.currency,method_id:null,method_type:null,method_name:null,account_name:null,destination:null,
+   instructions:null,reference:null,normalized_reference:null,receipt_file_id:null,receipt_unique_id:null,receipt_type:null,
+   receipt_filename:null,receipt_mime:null,receipt_size:null,created_at:new Date(1000).toISOString(),submitted_at:null,rejection_reason:null};
+   state.requests.set(id,r);return id;},
+  async snapshotMethod(id,method,m){Object.assign(state.requests.get(String(id)),{status:"AWAITING_REFERENCE",method_id:method,
+   method_type:m.type,method_name:m.display_name,account_name:m.account_name,destination:m.destination,instructions:m.instructions});},
+  async referenceExists(norm,except){return [...state.requests.values()].some(r=>r.id!==except&&r.normalized_reference===norm);},
+  async saveReference(id,raw,norm){Object.assign(state.requests.get(String(id)),{reference:raw,normalized_reference:norm,status:"AWAITING_RECEIPT"});state.refs.add(norm);},
+  async saveReceipt(id,r){Object.assign(state.requests.get(String(id)),{...{receipt_file_id:r.fileId,receipt_unique_id:r.uniqueId,
+   receipt_type:r.type,receipt_filename:r.filename,receipt_mime:r.mime,receipt_size:r.size,status:"PENDING_REVIEW",
+   submitted_at:new Date().toISOString()}});},
+  async enqueueAdmin(id,language,adminId){if(!state.notifications.some(n=>n.id===id))state.notifications.push({id,language,adminId});},
+  async cancel(id){Object.assign(state.requests.get(String(id)),{status:"CANCELLED",open_user_id:null});},
+ };
+ let tail=Promise.resolve();const store={async withAction(fn){const prior=tail;let release;tail=new Promise(r=>release=r);await prior;
+  try{return await fn(unit);}finally{release();}}};
+ return{state,service:new PaymentService(store,{adminId:null})};
+}
+
+test("mock preparation and repeated start keep one active attempt and charge zero",async()=>{
+ const f=fixture();const a=await f.service.prepare("tg","start-key"),b=await f.service.prepare("tg","other-key");
+ assert.equal(a.attempt.status,"READY");assert.equal(a.attempt.id,b.attempt.id);assert.equal(f.state.used,0);
+ assert.equal(f.state.items.get(a.attempt.id).length,2);
+});
+test("opening is free, first accepted answer charges once, revisions do not charge again",async()=>{
+ const f=fixture();const ready=await f.service.prepare("tg","answer-key"),id=ready.attempt.id;
+ const open=await f.service.open("tg",id,0);assert.equal(open.secondsRemaining,120);assert.equal(f.state.used,0);
+ await f.service.answer("tg",id,0,0,0);assert.equal(f.state.used,1);
+ await f.service.answer("tg",id,0,1,0);assert.equal(f.state.used,1);
+ await f.service.answer("tg",id,0,1,1);assert.equal(f.state.used,1);
+});
+test("mock answer and review render the localized selected-answer label",async()=>{
+ assert.equal(message("en","student.selected","A"),"Your answer: A");
+ assert.equal(message("am","student.selected","A"),"የእርስዎ መልስ፦ A");
+ const f=fixture({questions:1}),sent=[];
+ const flow=createMockFlow(f.service,{async sendMessage(_chat,text,markup){sent.push({text,markup});}});
+ await flow.callback("chat","tg","m:s:ui-label","1");
+ const openData=sent.at(-1).markup.inline_keyboard.flat().find(b=>b.callback_data.startsWith("m:o:")).callback_data;
+ await flow.callback("chat","tg",openData,"2");
+ const answerData=sent.at(-1).markup.inline_keyboard[0][0].callback_data;
+ await flow.callback("chat","tg",answerData,"3");
+ assert.match(sent.at(-1).text,/Your answer: A/);
+ assert.doesNotMatch(sent.at(-1).text,/student\.selected/);
+});
+test("resume preserves same attempt, frozen items and server deadline; results count unanswered",async()=>{
+ const f=fixture({questions:3});const ready=await f.service.prepare("tg","resume-key"),id=ready.attempt.id;
+ await f.service.open("tg",id,0);await f.service.answer("tg",id,0,0,0);
+ const active=(await f.service.intro("tg")).active;
+ const resumed=await f.service.open("tg",active.id);
+ assert.equal(resumed.attempt.id,id);assert.equal(resumed.item.sequence,1);assert.equal(resumed.attempt.deadline,(await f.service.open("tg",id,0)).attempt.deadline);
+ await f.service.answer("tg",id,1,1,0);const result=await f.service.submit("tg",id);
+ assert.equal(result.score.correct,1);assert.equal(result.score.incorrect,1);assert.equal(result.score.unanswered,1);
+ assert.equal(f.state.used,1);
+});
+test("zero-answer timeout does not consume allowance and late answers are rejected",async()=>{
+ const f=fixture({duration:1});const ready=await f.service.prepare("tg","timeout-key"),id=ready.attempt.id;
+ await f.service.open("tg",id,0);f.state.now+=60000;
+ const result=await f.service.answer("tg",id,0,0,0);
+ assert.equal(result.attempt.status,"EXPIRED");assert.equal(f.state.used,0);assert.equal(result.question,null);
+});
+test("mock ownership, invalid frozen option, and shortage fail closed",async()=>{
+ const f=fixture();const a=await f.service.prepare("tg","owned-key");
+ await assert.rejects(f.service.open("other",a.attempt.id),e=>e instanceof MockError&&e.key==="student.invalid");
+ await f.service.open("tg",a.attempt.id,0);
+ await assert.rejects(f.service.answer("tg",a.attempt.id,0,7,0),e=>e instanceof MockError&&e.key==="student.invalid");
+ const short=fixture({questions:5});await assert.rejects(short.service.prepare("tg","short-key"),e=>e instanceof MockError&&e.key==="mock.empty");
+ assert.equal(short.state.used,0);assert.equal(short.state.attempts.size,0);
+});
+test("payment references mirror Spring normalization and validation",()=>{
+ assert.deepEqual(PaymentService.normalizeReference(" ab-123 "),{raw:"ab-123",normalized:"AB-123"});
+ for(const value of ["", "ab", "1 starts", "/start", "x".repeat(101)])
+  assert.throws(()=>PaymentService.normalizeReference(value),e=>e instanceof PaymentError&&e.key==="payment.referenceInvalid");
+});
+test("receipt metadata accepts only bounded Telegram image and PDF metadata",()=>{
+ const service=new PaymentService({});
+ assert.equal(service.validateReceipt({fileId:"file-1",uniqueId:"unique-1",type:"PHOTO",filename:null,mime:"image/jpeg",size:100}).filename,"receipt.jpg");
+ assert.equal(service.validateReceipt({fileId:"doc_1",uniqueId:"unique_1",type:"DOCUMENT",filename:"proof.pdf",mime:"application/pdf",size:100}).filename,"proof.pdf");
+ for(const r of [
+  {fileId:"../bad",uniqueId:"u",type:"PHOTO",mime:"image/jpeg",size:1},
+  {fileId:"f",uniqueId:"u",type:"DOCUMENT",filename:"evil.txt",mime:"application/pdf",size:10},
+  {fileId:"f",uniqueId:"u",type:"DOCUMENT",filename:"proof.pdf",mime:"application/pdf",size:10485761},
+ ])assert.throws(()=>service.validateReceipt(r),e=>e instanceof PaymentError&&e.key==="payment.receiptInvalid");
+});
+test("payment settings gate new requests and price is read from staging settings",async()=>{
+ const off=paymentFixture({paymentEnabled:false}),v=await off.service.status("tg");
+ assert.equal(v.enabled,false);assert.equal(v.price,"123.45");assert.equal(v.currency,"ETB");
+ await assert.rejects(off.service.start("tg","disabled-key"),e=>e instanceof PaymentError&&e.key==="payment.disabled");
+ assert.equal(off.state.requests.size,0);
+ const on=paymentFixture();const request=await on.service.start("tg","payment-key");
+ assert.equal(request.request.amount,"123.45");assert.equal(request.request.currency,"ETB");
+});
+test("payment method, reference, receipt and duplicate update handling preserve request identity",async()=>{
+ const f=paymentFixture(),started=await f.service.start("tg","request-key"),id=started.request.id;
+ await f.service.select("tg",id,"1");
+ const ref=await f.service.reference("tg",id," Stg_Ref-001 ");
+ assert.equal(ref.request.status,"AWAITING_RECEIPT");assert.equal(ref.request.reference,"Stg_Ref-001");
+ const other=await f.service.start("tg2","other-key");await f.service.select("tg2",other.request.id,"1");
+ await assert.rejects(f.service.reference("tg2",other.request.id,"stg_ref-001"),
+  e=>e instanceof PaymentError&&e.key==="payment.duplicateReference");
+ const receipt={fileId:"file1",uniqueId:"unique1",type:"PHOTO",filename:null,mime:"image/jpeg",size:2048};
+ const first=await f.service.receipt("tg",id,receipt),again=await f.service.receipt("tg",id,receipt);
+ assert.equal(first.request.status,"PENDING_REVIEW");assert.equal(again.request.id,id);
+ assert.equal(f.state.requests.size,2);assert.equal(f.state.notifications.length,1);
+});
