@@ -1,5 +1,9 @@
 [CmdletBinding()]
-param()
+param(
+    [ValidateSet('Phase4AndRemoval','RemovalOnly')]
+    [string]$PostgresTestSet = 'Phase4AndRemoval',
+    [switch]$JavaOnly
+)
 
 $ErrorActionPreference = 'Stop'
 $dbName = 'airline_exam_bot_phase5_test'
@@ -8,7 +12,10 @@ $adminDb = 'postgres'
 $root = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
 $testFile = Join-Path $root 'supabase/functions/telegram-webhook/tests/phase4.postgres.test.ts'
 $practiceTestFile = Join-Path $root 'supabase/functions/telegram-webhook/tests/practice.postgres.test.ts'
-$javaTest = Join-Path $root 'src/test/java/com/airlineprep/bot/payment/Phase4PostgresIT.java'
+$javaTests = @(
+    (Join-Path $root 'src/test/java/com/airlineprep/bot/payment/Phase4PostgresIT.java'),
+    (Join-Path $root 'src/test/java/com/airlineprep/bot/admin/RegisteredUserRemovalPostgresIT.java')
+)
 $oldEnv = @{}
 $envNames = @('PGPASSWORD','PGHOST','PGPORT','PGUSER','PGDATABASE','DATABASE_URL','SPRING_DATASOURCE_URL','SPRING_DATASOURCE_USERNAME','SPRING_DATASOURCE_PASSWORD','SPRING_FLYWAY_URL','SPRING_FLYWAY_USER','SPRING_FLYWAY_PASSWORD','SPRING_APPLICATION_JSON','SPRING_PROFILES_ACTIVE','FLYWAY_URL','FLYWAY_USER','FLYWAY_PASSWORD','EDGE_TEST_DATABASE_URL','PHASE4_PG_HOST','PHASE4_PG_DATABASE','PHASE4_PG_TEST_USER','PHASE4_PG_TEST_PASSWORD','DB_HOST','DB_PORT','DB_NAME','DB_USERNAME','DB_PASSWORD','TELEGRAM_BOT_TOKEN','TELEGRAM_WEBHOOK_SECRET','PHONE_IDENTITY_HMAC_KEY','TELEGRAM_ADMIN_ID')
 $pgPassword = $null
@@ -80,7 +87,8 @@ try {
         Stop-Safely 'Repository Supabase project reference does not match the staging allowlist.'
     }
     $failureStage = 'Flyway migration inventory'
-    if (-not (Test-Path -LiteralPath $testFile) -or -not (Test-Path -LiteralPath $practiceTestFile) -or -not (Test-Path -LiteralPath $javaTest)) { Stop-Safely 'Phase 4 integration test source is missing.' }
+    if (-not (Test-Path -LiteralPath $testFile) -or -not (Test-Path -LiteralPath $practiceTestFile) -or
+        @($javaTests | Where-Object { -not (Test-Path -LiteralPath $_) }).Count -gt 0) { Stop-Safely 'Phase 5 integration test source is missing.' }
     $sqlMigrations = @(Get-ChildItem (Join-Path $root 'src/main/resources/db/migration') -Filter 'V*__*.sql' -File |
         ForEach-Object { if ($_.Name -match '^V([0-9]+)__') { [int]$Matches[1] } } | Sort-Object -Unique)
     $javaMigrations = @(Get-ChildItem (Join-Path $root 'src/main/java/db/migration') -Filter 'V*__*.java' -File |
@@ -323,10 +331,20 @@ END $$;
     [Environment]::SetEnvironmentVariable('PGPASSWORD', $null, 'Process')
 
     $failureStage = 'Spring Boot PostgreSQL integration tests and Flyway migrations'
-    Write-Output 'Running Spring Boot Phase 5 PostgreSQL integration test; Spring Boot Flyway applies the repository SQL and Java migrations.'
+    Write-Output 'Running Spring Boot PostgreSQL integration tests; Spring Boot Flyway applies the repository SQL and Java migrations.'
     Push-Location $root
     try {
         $mavenStartedAt = [DateTime]::UtcNow
+        if ($PostgresTestSet -eq 'RemovalOnly') {
+            $mavenTestSelector = 'RegisteredUserRemovalPostgresIT'
+            $reportNames = @('TEST-com.airlineprep.bot.admin.RegisteredUserRemovalPostgresIT.xml')
+        } else {
+            $mavenTestSelector = 'Phase4PostgresIT,RegisteredUserRemovalPostgresIT'
+            $reportNames = @(
+                'TEST-com.airlineprep.bot.payment.Phase4PostgresIT.xml',
+                'TEST-com.airlineprep.bot.admin.RegisteredUserRemovalPostgresIT.xml'
+            )
+        }
         $previousErrorPreference = $ErrorActionPreference
         try {
             # Windows PowerShell 5.1 can promote native stderr to a terminating
@@ -334,7 +352,7 @@ END $$;
             # continue while capturing streams; the native exit code and fresh
             # Surefire report determine success below.
             $ErrorActionPreference = 'Continue'
-            $mvnOutput = @(& $maven -q -Dtest=Phase4PostgresIT test 2>&1)
+            $mvnOutput = @(& $maven -q "-Dtest=$mavenTestSelector" test 2>&1)
             $mvnExitCode = $LASTEXITCODE
         } finally {
             $ErrorActionPreference = $previousErrorPreference
@@ -356,28 +374,31 @@ END $$;
             else { Write-Output "MAVEN STDERR: $safeLine" }
         }
 
-        $surefirePath = Join-Path $root 'target/surefire-reports/TEST-com.airlineprep.bot.payment.Phase4PostgresIT.xml'
         $surefireTests = 0; $surefireFailures = 0; $surefireErrors = 0; $surefireSkipped = 0
         $surefireFailureText = @()
-        if ((Test-Path -LiteralPath $surefirePath -PathType Leaf) -and
-            (Get-Item -LiteralPath $surefirePath).LastWriteTimeUtc -ge $mavenStartedAt.AddSeconds(-2)) {
+        $freshReports = 0
+        foreach ($reportName in $reportNames) {
+            $surefirePath = Join-Path (Join-Path $root 'target/surefire-reports') $reportName
+            if (-not (Test-Path -LiteralPath $surefirePath -PathType Leaf) -or
+                (Get-Item -LiteralPath $surefirePath).LastWriteTimeUtc -lt $mavenStartedAt.AddSeconds(-2)) { continue }
             try {
                 [xml]$surefire = Get-Content -Raw -LiteralPath $surefirePath
                 $suite = $surefire.testsuite
-                $surefireTests = [int]$suite.tests; $surefireFailures = [int]$suite.failures
-                $surefireErrors = [int]$suite.errors; $surefireSkipped = [int]$suite.skipped
+                $surefireTests += [int]$suite.tests; $surefireFailures += [int]$suite.failures
+                $surefireErrors += [int]$suite.errors; $surefireSkipped += [int]$suite.skipped
+                $freshReports++
                 foreach ($case in @($suite.testcase)) {
                     if ($case.failure) { $surefireFailureText += [string]$case.failure.message }
                     if ($case.error) { $surefireFailureText += [string]$case.error.message }
                 }
-                Write-Output "Surefire: tests=$surefireTests failures=$surefireFailures errors=$surefireErrors skipped=$surefireSkipped"
-                foreach ($failureText in $surefireFailureText) { Write-Output "SUREFIRE FAILURE: $(Protect-ProcessText $failureText)" }
             } catch {
-                Write-Output 'WARNING: The fresh Surefire report could not be parsed; Maven exit code remains authoritative for process status.'
+                Write-Output "WARNING: Fresh Surefire report '$reportName' could not be parsed; Maven exit code remains authoritative for process status."
             }
-        } else {
-            Write-Output 'Surefire: no fresh Phase4PostgresIT report found for this Maven invocation.'
         }
+        if ($freshReports -gt 0) {
+            Write-Output "Surefire ($PostgresTestSet PostgreSQL classes): tests=$surefireTests failures=$surefireFailures errors=$surefireErrors skipped=$surefireSkipped"
+            foreach ($failureText in $surefireFailureText) { Write-Output "SUREFIRE FAILURE: $(Protect-ProcessText $failureText)" }
+        } else { Write-Output 'Surefire: no fresh selected PostgreSQL integration reports found for this Maven invocation.' }
 
         if ($mvnExitCode -ne 0) {
             Write-Output "ERROR: Maven process failed with exit code $mvnExitCode."
@@ -385,9 +406,12 @@ END $$;
             foreach ($line in @($mavenStderr | Select-Object -Last 25)) { Write-Output "MAVEN STDERR: $(Protect-ProcessText $line)" }
             Stop-Safely 'Spring Boot Phase 5 PostgreSQL test or Flyway migration failed; see sanitized Maven/Surefire context above.'
         }
-        if ($surefireTests -lt 1 -or $surefireFailures -gt 0 -or $surefireErrors -gt 0) {
-            Stop-Safely 'Maven exited successfully but the fresh Phase 4 Surefire report is absent or contains failed tests.'
+        if ($freshReports -ne $reportNames.Count -or $surefireTests -lt 1 -or $surefireFailures -gt 0 -or $surefireErrors -gt 0) {
+            Stop-Safely 'Maven exited successfully but the fresh selected PostgreSQL Surefire reports are absent or contain failed tests.'
         }
+        if ($JavaOnly) {
+            Write-Output 'Java-only verification requested; skipping Deno Edge tests.'
+        } else {
         $denoCommand = Get-Command deno -ErrorAction SilentlyContinue
         if (-not $denoCommand) {
             $winget = Get-Command winget -ErrorAction SilentlyContinue
@@ -445,8 +469,12 @@ END $$;
             Stop-Safely 'Deno exited successfully but did not report a successful Phase 4 test result.'
         }
         Write-Output "Deno tests: $denoPassed passed; $denoFailed failed."
+        }
     } finally { Pop-Location }
     $failureStage = 'Flyway final-version and synthetic-fixture cleanup verification'
+    # The Deno handoff clears PGPASSWORD before tests run. Restore the local
+    # admin credential only for these read-only final database checks.
+    [Environment]::SetEnvironmentVariable('PGPASSWORD', $pgPassword, 'Process')
     $latest = Invoke-LocalPsql $dbName "SELECT COALESCE(MAX(version::int),0) FROM flyway_schema_history WHERE success;" -Quiet
     if ($latest -ne '19') { Stop-Safely 'Flyway did not finish at V19.' }
     $left = Invoke-LocalPsql $dbName "SELECT (SELECT COUNT(*) FROM exam_types)+(SELECT COUNT(*) FROM categories)+(SELECT COUNT(*) FROM bot_users)+(SELECT COUNT(*) FROM questions)+(SELECT COUNT(*) FROM payment_requests)+(SELECT COUNT(*) FROM mock_attempts)+(SELECT COUNT(*) FROM payment_methods)+(SELECT COUNT(*) FROM access_entitlements)+(SELECT COUNT(*) FROM practice_deliveries)+(SELECT COUNT(*) FROM practice_usage)+(SELECT COUNT(*) FROM practice_sessions)+(SELECT COUNT(*) FROM practice_update_receipts);" -Quiet

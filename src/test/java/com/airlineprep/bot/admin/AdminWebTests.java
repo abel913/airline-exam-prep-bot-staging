@@ -55,7 +55,7 @@ class AdminWebTests extends IsolatedDatabaseSupport {
         mvc.perform(get("/admin/login")).andExpect(status().isOk());
         mvc.perform(get("/assets/admin.css")).andExpect(status().isOk());
     }
-    @ParameterizedTest @ValueSource(strings={"/admin","/admin/settings","/admin/exam-types","/admin/categories"})
+    @ParameterizedTest @ValueSource(strings={"/admin","/admin/settings","/admin/exam-types","/admin/categories","/admin/users"})
     void adminPagesRequireLogin(String path) throws Exception {
         mvc.perform(get(path)).andExpect(status().is3xxRedirection())
             .andExpect(redirectedUrl("/admin/login"));
@@ -69,7 +69,7 @@ class AdminWebTests extends IsolatedDatabaseSupport {
         mvc.perform(get("/actuator/health")).andExpect(status().isOk()).andExpect(content().json("{\"status\":\"UP\"}"));
         mvc.perform(get("/actuator/env")).andExpect(status().isForbidden());
     }
-    @ParameterizedTest @ValueSource(strings={"/admin/settings","/admin/exam-types/new","/admin/categories/new","/admin/logout"})
+    @ParameterizedTest @ValueSource(strings={"/admin/settings","/admin/exam-types/new","/admin/categories/new","/admin/users/1/remove","/admin/logout"})
     void csrfProtectsEveryMutation(String path) throws Exception {
         mvc.perform(post(path).with(user("test-admin").roles("ADMIN"))).andExpect(status().isForbidden());
     }

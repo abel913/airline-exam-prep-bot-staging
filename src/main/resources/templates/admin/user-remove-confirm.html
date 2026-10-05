@@ -1,0 +1,31 @@
+<!doctype html><html lang="en" xmlns:th="http://www.thymeleaf.org">
+<head th:replace="~{admin/fragments :: head('Remove Registered User')}"></head><body><header th:replace="~{admin/fragments :: header}"></header>
+<div class="shell"><nav th:replace="~{admin/fragments :: nav}"></nav><main>
+<a class="back" th:href="@{/admin/users}">← Registered users</a><h1>Remove registered user</h1>
+<div class="notice error" role="alert"><strong>Permanent deletion.</strong> Removing this user will permanently delete the user’s registration, exam entitlements, practice progress, mock history, and associated test payment records. Exam questions and system configuration will not be deleted.</div>
+<div class="notice error" th:if="${error}" th:text="${error}"></div>
+<section class="panel"><h2>User</h2><dl>
+<dt>Database user ID</dt><dd th:text="${summary.id}"></dd>
+<dt>Telegram username</dt><dd th:text="${telegramUsername}"></dd>
+<dt>Telegram user ID</dt><dd th:text="${summary.telegramId}"></dd>
+<dt>Contact phone</dt><dd th:text="${summary.maskedPhone}"></dd>
+<dt>Phone verification status</dt><dd th:text="${summary.verification}"></dd>
+<dt>Registration date</dt><dd th:text="${summary.registered}"></dd>
+<dt>Selected/current exam</dt><dd th:text="${summary.currentExam == null ? 'None selected' : summary.currentExam}"></dd>
+</dl></section>
+<section class="panel"><h2>User data to be removed</h2><dl>
+<dt>Activated exams</dt><dd th:text="${summary.activatedExams}"></dd>
+<dt>Practice progress records</dt><dd th:text="${summary.practiceProgress}"></dd>
+<dt>Answered practice questions</dt><dd th:text="${summary.practiceAnswers}"></dd>
+<dt>Mock attempts</dt><dd th:text="${summary.mockAttempts}"></dd>
+<dt>Payment requests</dt><dd th:text="${summary.paymentRequests}"></dd>
+<dt>Lifetime grants</dt><dd th:text="${summary.lifetimeGrants}"></dd>
+</dl></section>
+<form th:action="@{/admin/users/{id}/remove(id=${summary.id})}" method="post" class="panel">
+<label for="confirmation">Type REMOVE to confirm permanent deletion</label>
+<input id="confirmation" name="confirmation" type="text" autocomplete="off" required pattern="REMOVE" aria-describedby="remove-help">
+<p id="remove-help" class="fine">This action cannot be undone. Questions, exams, categories, payment methods, settings, and other users remain intact.</p>
+<button class="danger-button" type="submit">Permanently Remove User</button>
+<a class="cancel-link" th:href="@{/admin/users}">Cancel</a>
+</form>
+</main></div></body></html>
