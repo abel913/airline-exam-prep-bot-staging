@@ -1,0 +1,169 @@
+name: Phase 5 payment and language PostgreSQL integration
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - phase5-payment-language-ci
+
+permissions:
+  contents: read
+
+concurrency:
+  group: phase5-payment-language-postgres-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  postgres-integration:
+    name: PostgreSQL 17 / Spring Flyway V20 / Deno Edge tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_HOST_AUTH_METHOD: trust
+          POSTGRES_DB: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d postgres"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      PHASE4_PG_HOST: 127.0.0.1
+      PHASE4_PG_PORT: "5432"
+      PHASE4_PG_DATABASE: airline_exam_bot_phase5_test
+      PHASE4_PG_TEST_USER: phase5_ci
+      PHASE4_PG_TEST_PASSWORD: ""
+      EDGE_TEST_DATABASE_URL: postgresql://phase5_ci@127.0.0.1:5432/airline_exam_bot_phase5_test?sslmode=disable
+      PGHOST: 127.0.0.1
+      PGPORT: "5432"
+      PGUSER: phase5_ci
+      PGPASSWORD: ""
+      PGDATABASE: airline_exam_bot_phase5_test
+
+    steps:
+      - name: Check out test branch
+        uses: actions/checkout@v4
+
+      - name: Set up Java 21
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+
+      - name: Set up Deno 2.9.7
+        uses: denoland/setup-deno@v2
+        with:
+          deno-version: 2.9.7
+
+      - name: Confirm tool versions
+        run: |
+          java -version
+          deno --version
+          psql --version
+
+      - name: Create restricted disposable test database role
+        env:
+          PGUSER: postgres
+          PGPASSWORD: ""
+          PGDATABASE: postgres
+        run: |
+          psql -X -v ON_ERROR_STOP=1 -h 127.0.0.1 -p 5432 <<'SQL'
+          CREATE ROLE phase5_ci LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION;
+          CREATE DATABASE airline_exam_bot_phase5_test OWNER phase5_ci;
+          SQL
+
+      - name: Run Spring PostgreSQL payment and user-removal baseline
+        run: |
+          chmod +x ./mvnw
+          ./mvnw -q -Dtest=PaymentPostgresIT,RegisteredUserRemovalPostgresIT test
+          python3 - <<'PY'
+          import glob
+          import sys
+          import xml.etree.ElementTree as ET
+
+          names = (
+              "target/surefire-reports/TEST-com.airlineprep.bot.payment.PaymentPostgresIT.xml",
+              "target/surefire-reports/TEST-com.airlineprep.bot.admin.RegisteredUserRemovalPostgresIT.xml",
+          )
+          totals = {"tests": 0, "failures": 0, "errors": 0, "skipped": 0}
+          found = 0
+          for name in names:
+              files = glob.glob(name)
+              if not files:
+                  print(f"Missing Surefire report: {name}", file=sys.stderr)
+                  sys.exit(1)
+              root = ET.parse(files[0]).getroot()
+              found += 1
+              for key in totals:
+                  totals[key] += int(root.attrib.get(key, 0))
+          print("SPRING POSTGRES: PASS " + " ".join(f"{k}={v}" for k, v in totals.items()))
+          if found != len(names) or totals["tests"] < 1 or totals["failures"] or totals["errors"]:
+              sys.exit(1)
+          PY
+
+      - name: Verify Spring Flyway reached V20
+        run: |
+          latest="$(psql -X -v ON_ERROR_STOP=1 -h 127.0.0.1 -p 5432 -d airline_exam_bot_phase5_test -Atqc "SELECT COALESCE(MAX(version::int),0) FROM flyway_schema_history WHERE success")"
+          test "$latest" = "20"
+          echo "FLYWAY: V$latest"
+
+      - name: Type-check PostgreSQL Edge integration files
+        run: >-
+          deno check
+          supabase/functions/telegram-webhook/tests/practice.postgres.test.ts
+          supabase/functions/telegram-webhook/tests/phase4.postgres.test.ts
+
+      - name: Run each Deno PostgreSQL file sequentially
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          run_postgres_file() {
+            local label="$1"
+            local file="$2"
+            local output summary count failed
+
+            if ! output="$(deno test --allow-env=EDGE_TEST_DATABASE_URL --allow-net=127.0.0.1,localhost "$file" 2>&1)"; then
+              printf '%s\n' "$output" >&2
+              echo "$label: FAIL" >&2
+              return 1
+            fi
+
+            printf '%s\n' "$output"
+            summary="$(printf '%s\n' "$output" | grep -E '(^|[[:space:]])[0-9]+ passed([[:space:]]|$)' | tail -n 1 || true)"
+            if [[ -z "$summary" ]]; then
+              echo "$label: FAIL (Deno did not report executed assertions)"
+              return 1
+            fi
+            count="$(printf '%s\n' "$summary" | sed -nE 's/.*([0-9]+) passed.*/\1/p')"
+            failed="$(printf '%s\n' "$summary" | sed -nE 's/.*\|[[:space:]]*([0-9]+) failed.*/\1/p')"
+            if [[ -z "$count" || "$count" -lt 1 || -z "$failed" || "$failed" -ne 0 ]]; then
+              echo "$label: FAIL (invalid Deno test summary: $summary)"
+              return 1
+            fi
+            echo "$label: PASS tests=$count"
+            echo "DENO_POSTGRES_FILE|$(basename "$file")|PASS"
+            echo "$count"
+          }
+
+          if ! practice_result="$(run_postgres_file 'PRACTICE POSTGRES' 'supabase/functions/telegram-webhook/tests/practice.postgres.test.ts')"; then
+            echo "PRACTICE POSTGRES: FAIL"
+            exit 1
+          fi
+          practice_tests="$(printf '%s\n' "$practice_result" | tail -n 1)"
+          printf '%s\n' "$practice_result" | sed '$d'
+
+          if ! phase4_result="$(run_postgres_file 'PHASE4/PAYMENT/LANGUAGE POSTGRES' 'supabase/functions/telegram-webhook/tests/phase4.postgres.test.ts')"; then
+            echo "PHASE4/PAYMENT/LANGUAGE POSTGRES: FAIL"
+            exit 1
+          fi
+          phase4_tests="$(printf '%s\n' "$phase4_result" | tail -n 1)"
+          printf '%s\n' "$phase4_result" | sed '$d'
+
+          total_tests=$((practice_tests + phase4_tests))
+          echo "DENO POSTGRESQL INTEGRATION: PASS files=2 tests=$total_tests failures=0"

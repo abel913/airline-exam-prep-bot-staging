@@ -3,6 +3,7 @@ import { PostgresDatabase } from "../postgres-database.ts";
 import { PostgresMockStore } from "../mock-store.ts";
 import { MockService } from "../mock-service.mjs";
 import { PostgresPaymentStore } from "../payment-store.ts";
+import { PostgresRegistrationStore } from "../postgres-store.ts";
 import { PaymentError, PaymentService } from "../payment-service.mjs";
 import { createPaymentFlow } from "../payment-flow.mjs";
 
@@ -218,6 +219,91 @@ Deno.test("Phase 4 PostgreSQL: mocks and payments preserve transactional state",
           AND action='PAYMENT_SUBMITTED_FOR_REVIEW') audits`).rows[0]);
     assert.equal(Number(proofCounts.notifications), 1);
     assert.equal(Number(proofCounts.audits), 1, "replayed Telegram update does not duplicate review audit");
+    await database.transaction(async (c) => {
+      for (const questionId of questionIds.slice(1, 3)) {
+        const delivery = await c.queryObject<{ id: bigint }>`INSERT INTO practice_deliveries
+          (user_id,question_id,version_id,category_filter,created_at,selected_option,answered_at)
+          SELECT ${otherId},q.id,q.current_version_id,NULL,CURRENT_TIMESTAMP,0,CURRENT_TIMESTAMP
+          FROM questions q WHERE q.id=${questionId} RETURNING id`;
+        assert.equal(delivery.rows.length, 1);
+        await c.queryArray`INSERT INTO practice_usage(user_id,question_id,first_delivery_id,created_at)
+          VALUES(${otherId},${questionId},${String(delivery.rows[0].id)},CURRENT_TIMESTAMP)`;
+      }
+      await c.queryArray`UPDATE access_entitlements SET practice_used=2 WHERE user_id=${otherId} AND exam_type_id=${examId}`;
+    });
+    const languageMock = await mock.prepare(tgLookup(otherId), crypto.randomUUID());
+    await mock.open(tgLookup(otherId), languageMock.attempt.id, 0);
+    await mock.answer(tgLookup(otherId), languageMock.attempt.id, 0, 0, 0);
+    const readLanguageState = async () => await database.withConnection(async (c) => (await c.queryObject<{
+      user_id: bigint; preferred_language: string; selected_exam_type_id: string; registration_status: string;
+      entitlement_count: bigint; entitlements: string; practice_usage: string; mock_attempts: string;
+      payment_requests: string;
+    }>`SELECT u.id user_id,u.preferred_language,u.selected_exam_type_id::text selected_exam_type_id,
+        u.registration_status,
+        (SELECT COUNT(*) FROM access_entitlements WHERE user_id=u.id) entitlement_count,
+        COALESCE((SELECT jsonb_agg(jsonb_build_object('exam_type_id',exam_type_id::text,
+          'access_level',access_level,'practice_limit',practice_limit,'mock_limit',mock_limit,
+          'questions_per_mock',questions_per_mock,'practice_used',practice_used,'mocks_used',mocks_used,
+          'grant_source',grant_source) ORDER BY exam_type_id)::text
+          FROM access_entitlements WHERE user_id=u.id),'[]') entitlements,
+        COALESCE((SELECT jsonb_agg(jsonb_build_object('question_id',question_id::text,
+          'first_delivery_id',first_delivery_id::text) ORDER BY question_id)::text
+          FROM practice_usage WHERE user_id=u.id),'[]') practice_usage,
+        COALESCE((SELECT jsonb_agg(jsonb_build_object('id',a.id::text,'exam_type_id',a.exam_type_id::text,
+          'status',a.status,'question_count',a.question_count,'cursor_position',a.cursor_position,
+          'correct_count',a.correct_count,'incorrect_count',a.incorrect_count,'unanswered_count',a.unanswered_count,
+          'items',(SELECT COALESCE(jsonb_agg(jsonb_build_object('sequence_number',i.sequence_number,
+            'question_id',i.question_id::text,'version_id',i.version_id::text,'selected_option',i.selected_option,
+            'answer_revision',i.answer_revision) ORDER BY i.sequence_number)::text,'[]')
+            FROM mock_items i WHERE i.attempt_id=a.id)) ORDER BY a.id)::text
+          FROM mock_attempts a WHERE a.user_id=u.id),'[]') mock_attempts,
+        COALESCE((SELECT jsonb_agg(jsonb_build_object('id',p.id::text,
+          'target_exam_type_id',p.target_exam_type_id::text,'status',p.status,
+          'payment_proof_text',p.payment_proof_text,'method_id',p.method_id::text) ORDER BY p.id)::text
+          FROM payment_requests p WHERE p.user_id=u.id),'[]') payment_requests
+      FROM bot_users u WHERE u.id=${otherId}`).rows[0]);
+    const beforeLanguageChange = await readLanguageState();
+    assert.equal(beforeLanguageChange.preferred_language, "en");
+    assert.equal(Number(beforeLanguageChange.entitlement_count), 1);
+    const entitlementState = JSON.parse(beforeLanguageChange.entitlements);
+    assert.deepEqual(entitlementState.map((grant: { access_level: string }) => grant.access_level), ["FREE"]);
+    assert.equal(entitlementState[0].practice_used, 2);
+    assert.equal(entitlementState[0].mocks_used, 1);
+    const practiceState = JSON.parse(beforeLanguageChange.practice_usage);
+    assert.equal(practiceState.length, 2);
+    const mockState = JSON.parse(beforeLanguageChange.mock_attempts);
+    assert.equal(mockState.length, 1);
+    assert.equal(mockState[0].status, "IN_PROGRESS");
+    const paymentState = JSON.parse(beforeLanguageChange.payment_requests);
+    assert.equal(paymentState.length, 1);
+    assert.equal(paymentState[0].id, otherRequest.request.id);
+    assert.equal(paymentState[0].target_exam_type_id, examId);
+    assert.equal(paymentState[0].status, "PENDING_REVIEW");
+    assert.equal(paymentState[0].payment_proof_text, fullProof);
+    const registration = new PostgresRegistrationStore(database, () => "unused-synthetic-test-key");
+    const amharicMenu = await registration.language(tgLookup(otherId), "am");
+    assert.equal(amharicMenu.status, "COMPLETED");
+    assert.equal(amharicMenu.language, "am");
+    assert.equal(amharicMenu.examName, "Synthetic Phase 4 Test Exam");
+    assert.equal(amharicMenu.grant?.practiceUsed, 2);
+    assert.equal(amharicMenu.grant?.mocksUsed, 1);
+    const afterAmharicChange = await readLanguageState();
+    assert.equal(afterAmharicChange.preferred_language, "am");
+    assert.equal(afterAmharicChange.user_id, beforeLanguageChange.user_id);
+    assert.equal(afterAmharicChange.selected_exam_type_id, examId);
+    assert.deepEqual({ ...afterAmharicChange, preferred_language: "en" }, beforeLanguageChange,
+      "switching to Amharic preserves identity, selected exam, every entitlement, practice, mock, payment, target and proof state");
+    const sameLanguageReplay = await registration.language(tgLookup(otherId), "am");
+    assert.equal(sameLanguageReplay.language, "am", "selecting the current language is idempotent");
+    assert.deepEqual(await readLanguageState(), afterAmharicChange,
+      "reselecting Amharic does not change account, progress, or payment state");
+    const englishMenu = await registration.language(tgLookup(otherId), "en");
+    assert.equal(englishMenu.language, "en");
+    assert.equal(englishMenu.examName, "Synthetic Phase 4 Test Exam");
+    const afterEnglishRestore = await readLanguageState();
+    assert.equal(afterEnglishRestore.preferred_language, "en");
+    assert.deepEqual(afterEnglishRestore, beforeLanguageChange,
+      "switching back restores the original language without changing any account, progress or payment state");
     await assert.rejects(database.transaction(async (c) => {
       await c.queryArray`UPDATE payment_requests SET status='PENDING_REVIEW',submitted_at=CURRENT_TIMESTAMP,
         payment_proof_text=NULL,receipt_file_id=NULL,receipt_unique_id=NULL WHERE id=${otherRequest.request.id}`;
@@ -252,6 +338,11 @@ Deno.test("Phase 4 PostgreSQL: mocks and payments preserve transactional state",
         await c.queryArray`DELETE FROM payment_methods WHERE id=${methodId || "0"}`;
         await c.queryArray`DELETE FROM payment_methods WHERE id=${telebirrMethodId || "0"}`;
         await c.queryArray`DELETE FROM payment_methods WHERE id=${inactiveMethodId || "0"}`;
+        await c.queryArray`DELETE FROM practice_usage WHERE user_id IN (${userId || "0"},${otherId || "0"})`;
+        await c.queryArray`DELETE FROM practice_sessions WHERE user_id IN (${userId || "0"},${otherId || "0"})`;
+        await c.queryArray`UPDATE practice_deliveries SET next_delivery_id=NULL,review_delivery_id=NULL
+          WHERE user_id IN (${userId || "0"},${otherId || "0"})`;
+        await c.queryArray`DELETE FROM practice_deliveries WHERE user_id IN (${userId || "0"},${otherId || "0"})`;
         await c.queryArray`DELETE FROM mock_items WHERE attempt_id IN (SELECT id FROM mock_attempts WHERE user_id IN (${userId || "0"},${otherId || "0"}))`;
         await c.queryArray`DELETE FROM mock_attempts WHERE user_id IN (${userId || "0"},${otherId || "0"})`;
         await c.queryArray`DELETE FROM access_entitlements WHERE user_id IN (${userId || "0"},${otherId || "0"})`;

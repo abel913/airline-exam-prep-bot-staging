@@ -8,6 +8,9 @@ import {
   phoneIdentity,
   phoneKeyFingerprint,
   requiredConfiguration,
+  completedMenu,
+  languageChangeKeyboard,
+  message,
 } from "../domain.mjs";
 
 const fixtureKey = "dGVzdC1vbmx5LWtleS0zMi1ieXRlcy1ub3QtYS1zZWNyZXQ=";
@@ -58,4 +61,31 @@ test("runtime configuration requires a transaction pooler URL and independent se
   assert.equal(requiredConfiguration({ ...base, DATABASE_URL: base.DATABASE_URL.replace(":6543", ":5432") }).ok, false);
   assert.equal(requiredConfiguration({ ...base, TELEGRAM_WEBHOOK_SECRET: "" }).webhookConfigured, false);
   assert.equal(requiredConfiguration({ ...base, PHONE_IDENTITY_HMAC_KEY: "dGVzdA==" }).ok, false);
+});
+
+test("completed main menu exposes Change Language in English and Amharic", () => {
+  const view = (language) => ({ language, examName: "Staging Test Exam", examNameAm: "", grant: {
+    accessLevel: "FREE", practiceLimit: 10, practiceUsed: 2, mockLimit: 2, mocksUsed: 1,
+  } });
+  const en = completedMenu(view("en")).reply_markup.inline_keyboard.flat();
+  const am = completedMenu(view("am")).reply_markup.inline_keyboard.flat();
+  assert.ok(en.some((button) => button.text === "Change Language" && button.callback_data === "lang:choose"));
+  assert.ok(am.some((button) => button.text === "ቋንቋ ቀይር" && button.callback_data === "lang:choose"));
+});
+
+test("language selector offers both languages and returns to menu", () => {
+  const keyboard = languageChangeKeyboard("am").inline_keyboard.flat();
+  assert.deepEqual(keyboard.map((button) => button.callback_data), ["lang:en", "lang:am", "s:home"]);
+  assert.equal(keyboard[2].text, message("am", "student.menu"));
+  assert.equal(message("en", "student.chooseLanguage"), "Choose your language.");
+  assert.notEqual(message("am", "student.chooseLanguage"), "student.chooseLanguage");
+});
+
+test("pending review message includes the exact English promise and no approval promise", () => {
+  assert.equal(message("en", "payment.status.PENDING_REVIEW"),
+    "Pending manual review.\n\nWe will review your request within 24 hours. If there is any issue, we will contact you directly.\n\nYour evidence is saved and cannot be edited.");
+  const am = message("am", "payment.status.PENDING_REVIEW");
+  assert.notEqual(am, "payment.status.PENDING_REVIEW");
+  assert.match(am, /24/);
+  assert.doesNotMatch(am, /ይጸድቃል|approved/i);
 });

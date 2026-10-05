@@ -48,6 +48,7 @@ class PaymentTelegramTests extends PaymentFixture {
   message(Map.of("text","DEVTEST-TG"));assertThat(queries.get(id).status()).isEqualTo(PaymentStatus.PENDING_REVIEW);
   assertThat(queries.get(id).paymentProofText()).isEqualTo("DEVTEST-TG");assertThat(queries.get(id).receipt()).isNull();
   assertThat(String.join("",texts)).contains("Pending manual review");
+  assertThat(String.join("",texts)).contains(messages.getMessage("payment.status.PENDING_REVIEW",null,Locale.ENGLISH));
   message(Map.of("photo",List.of(Map.of("file_id","photo","file_unique_id","unique","width",100,"height",100,"file_size",100))));
   assertThat(queries.get(id).status()).isEqualTo(PaymentStatus.PENDING_REVIEW);
   review.approve(id,"test-admin");message(Map.of("text","/start"));assertThat(String.join("",texts)).contains("Unlimited");
@@ -83,6 +84,7 @@ class PaymentTelegramTests extends PaymentFixture {
   long id=selected();payments.reference(sender,id,"DEVTEST-AMHARIC");
   message(Map.of("document",Map.of("file_id","png","file_unique_id","png_unique","file_name","test.png","mime_type","image/png","file_size",100)));
   assertThat(queries.get(id).receipt().mime()).isEqualTo("image/png");
-  assertThat(String.join("",texts)).contains("በመጠባበቅ");
+  assertThat(String.join("",texts)).contains("በአስተዳዳሪ በእጅ እየተገመገመ","24 ሰዓታት ውስጥ","ተቀምጧል");
+  assertThat(String.join("",texts)).doesNotContain("payment.status.PENDING_REVIEW");
  }
 }

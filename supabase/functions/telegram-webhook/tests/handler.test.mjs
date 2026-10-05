@@ -106,6 +106,42 @@ test("language and exam callbacks preserve callback IDs and show contact-share r
   assert.equal(telegram.calls.at(-1)[3].one_time_keyboard, false);
 });
 
+test("registered users can open the language selector and switch both ways without changing profile data", async () => {
+  const store = fakeStore();
+  const telegram = fakeTelegram();
+  const profile = { language: "en", examName: "Staging Test Exam", examNameAm: "", grant: {
+    accessLevel: "FREE", practiceLimit: 10, practiceUsed: 3, mockLimit: 2, mocksUsed: 1,
+  } };
+  store.current = async () => ({ status: "COMPLETED", ...profile });
+  store.language = async (id, language) => {
+    store.calls.push(["language", id, language]);
+    profile.language = language;
+    return { status: "COMPLETED", ...profile };
+  };
+  const handler = createTelegramWebhookHandler({ env, store, telegram });
+  const callback = (update_id, data) => ({ update_id, callback_query: {
+    id: `language-${update_id}`, data, from: { id: 77 }, message: { chat: { id: 77, type: "private" } },
+  } });
+
+  assert.equal((await handler(makeRequest(callback(301, "lang:choose")))).status, 200);
+  assert.equal(telegram.calls.at(-1)[2], "Choose your language.");
+  assert.deepEqual(telegram.calls.at(-1)[3].inline_keyboard.flat().map((button) => button.callback_data), ["lang:en", "lang:am", "s:home"]);
+
+  assert.equal((await handler(makeRequest(callback(302, "lang:am")))).status, 200);
+  assert.equal(profile.language, "am");
+  assert.match(telegram.calls.at(-1)[2], /የአሁኑ ፈተና/);
+  assert.ok(telegram.calls.at(-1)[3].inline_keyboard.flat().some((button) => button.text === "ቋንቋ ቀይር"));
+
+  // A retried selection of the already-selected language is an idempotent update.
+  assert.equal((await handler(makeRequest(callback(303, "lang:am")))).status, 200);
+  assert.equal(profile.language, "am");
+  assert.equal((await handler(makeRequest(callback(304, "lang:en")))).status, 200);
+  assert.equal(profile.language, "en");
+  assert.equal(profile.examName, "Staging Test Exam");
+  assert.deepEqual(profile.grant, { accessLevel: "FREE", practiceLimit: 10, practiceUsed: 3, mockLimit: 2, mocksUsed: 1 });
+  assert.deepEqual(store.calls.filter((call) => call[0] === "language").map((call) => call[2]), ["am", "am", "en"]);
+});
+
 test("typed phone is passed to registration and another account's contact does not register", async () => {
   const store = fakeStore();
   const telegram = fakeTelegram();

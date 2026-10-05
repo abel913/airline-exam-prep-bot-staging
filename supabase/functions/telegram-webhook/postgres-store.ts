@@ -150,6 +150,13 @@ export class PostgresRegistrationStore {
         `;
         return this.loadView(client, { ...user, preferred_language: language, registration_status: "EXAM_TYPE_REQUIRED" });
       }
+      if (user?.registration_status === "COMPLETED") {
+        await client.queryArray`
+          UPDATE bot_users SET preferred_language = ${language}, updated_at = CURRENT_TIMESTAMP
+          WHERE id = ${String(user.id)} AND registration_status = 'COMPLETED'
+        `;
+        return this.loadView(client, { ...user, preferred_language: language });
+      }
       return this.loadView(client, user);
     });
   }

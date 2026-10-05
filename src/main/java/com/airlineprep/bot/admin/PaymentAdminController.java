@@ -26,6 +26,7 @@ public class PaymentAdminController {
  @GetMapping("/admin/payments/{id}")
  public String detail(@PathVariable long id,Model model) {
   var p=queries.get(id);model.addAttribute("payment",p);model.addAttribute("duplicates",queries.duplicateReceipts(p));
+  model.addAttribute("paymentProofLinks",PaymentProofLinks.extract(p.paymentProofText()));
   model.addAttribute("events",audit.forPayment(id));
   return "admin/payment-detail";
  }

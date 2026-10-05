@@ -39,12 +39,22 @@ class PaymentWebTests extends PaymentFixture {
   mvc.perform(get("/admin/payment-audit").param("action","PAYMENT_REQUEST_CREATED").param("actorType","USER").with(user("admin").roles("ADMIN"))).andExpect(status().isOk());
  }
  @Test void textProofIsEscapedAndMultilineInAuthenticatedAdminReview() throws Exception {
-  String proof="Bank confirmation\n<script>alert('x')</script>\nhttps://provider.example/receipt?id=synthetic";
+  String proof="Bank confirmation\n<script>alert('x')</script>\nhttps://provider.example/receipt?id=synthetic\nhttp://example.test/form\nhttps://provider.example/receipt?id=synthetic\njavascript:alert(1)";
   jdbc.update("UPDATE payment_requests SET payment_proof_text=?,receipt_file_id=NULL,receipt_unique_id=NULL,receipt_type=NULL,receipt_filename=NULL,receipt_mime=NULL,receipt_size=NULL WHERE id=?",proof,payment);
   String html=mvc.perform(get("/admin/payments/"+payment).with(user("admin").roles("ADMIN"))).andExpect(status().isOk())
    .andReturn().getResponse().getContentAsString();
-  assertThat(html).contains("Payment proof","Bank confirmation","&lt;script&gt;alert(&#39;x&#39;)&lt;/script&gt;","https://provider.example/receipt?id=synthetic");
-  assertThat(html).doesNotContain("<script>alert('x')</script>");assertThat(html).contains("class=\"payment-proof\"");
+  assertThat(html).contains("Payment proof","Bank confirmation","&lt;script&gt;alert(&#39;x&#39;)&lt;/script&gt;",
+   "href=\"https://provider.example/receipt?id=synthetic\"","href=\"http://example.test/form\"","target=\"_blank\"","rel=\"noopener noreferrer\"","javascript:alert(1)");
+  assertThat(html).doesNotContain("<script>alert('x')</script>","href=\"javascript:");
+  assertThat(html.indexOf("href=\"https://provider.example/receipt?id=synthetic\"")).isLessThan(html.indexOf("href=\"http://example.test/form\""));
+  assertThat(html.split("target=\"_blank\"",-1).length-1).isEqualTo(2);
+  assertThat(html).contains("class=\"payment-proof\"");
+ }
+ @Test void referenceOnlyPaymentProofDoesNotRenderAnEmptyLinksSection() throws Exception {
+  jdbc.update("UPDATE payment_requests SET payment_proof_text='TEST-REF-001',receipt_file_id=NULL,receipt_unique_id=NULL,receipt_type=NULL,receipt_filename=NULL,receipt_mime=NULL,receipt_size=NULL WHERE id=?",payment);
+  String html=mvc.perform(get("/admin/payments/"+payment).with(user("admin").roles("ADMIN"))).andExpect(status().isOk())
+   .andReturn().getResponse().getContentAsString();
+  assertThat(html).contains("Payment proof","TEST-REF-001").doesNotContain("Links found in payment proof");
  }
  @Test void approveIsPostOnlyIdempotentAndAudited() throws Exception {
   mvc.perform(get("/admin/payments/"+payment+"/approve").with(user("admin").roles("ADMIN"))).andExpect(status().isMethodNotAllowed());

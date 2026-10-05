@@ -2,6 +2,7 @@ import {
   completedMenu,
   constantTimeTextEqual,
   examKeyboard,
+  languageChangeKeyboard,
   languageKeyboard,
   message,
   phoneKeyboard,
@@ -171,7 +172,15 @@ export function createTelegramWebhookHandler({ env, store, practice, mock, payme
 
       if (callback) {
         const data = typeof callback.data === "string" ? callback.data : "";
-        if (data === "lang:en" || data === "lang:am") {
+        if (data === "lang:choose") {
+          const view = await store.current(senderId);
+          if (view?.status === "COMPLETED") {
+            const language = view.language === "am" ? "am" : "en";
+            await telegram.sendMessage(chatId, message(language, "student.chooseLanguage"), languageChangeKeyboard(language));
+          } else if (view) {
+            await sendView(chatId, view, telegram);
+          }
+        } else if (data === "lang:en" || data === "lang:am") {
           await sendView(chatId, await store.language(senderId, data.slice(5)), telegram);
         } else if (/^exam:[1-9][0-9]{0,17}$/.test(data) && BigInt(data.slice(5)) <= LONG_MAX) {
           await sendView(chatId, await store.exam(senderId, data.slice(5)), telegram);

@@ -19,6 +19,8 @@ const EN = {
   "student.help": "Help",
   "student.menu": "Menu",
   "student.switchExam": "Switch Exam",
+  "student.changeLanguage": "Change Language",
+  "student.chooseLanguage": "Choose your language.",
   "student.currentExam": "Current Exam: {0}",
   "registration.switchExam": "Choose an active exam. Your previous progress remains saved.",
   "student.previous": "Previous",
@@ -70,7 +72,7 @@ const EN = {
   "payment.status.SELECT_METHOD": "Choose a payment method.",
   "payment.status.AWAITING_REFERENCE": "Waiting for payment proof text.",
   "payment.status.AWAITING_RECEIPT": "Waiting for payment proof text.",
-  "payment.status.PENDING_REVIEW": "Pending manual review. Your evidence is saved and cannot be edited.",
+  "payment.status.PENDING_REVIEW": "Pending manual review.\n\nWe will review your request within 24 hours. If there is any issue, we will contact you directly.\n\nYour evidence is saved and cannot be edited.",
   "payment.status.APPROVED": "Approved — lifetime access active.",
   "payment.status.REJECTED": "Rejected. You may create a new request with a new transaction reference.",
   "payment.status.CANCELLED": "Cancelled. Any submitted reference remains reserved.",
@@ -137,6 +139,8 @@ const AM = {
   "student.help": "እርዳታ",
   "student.menu": "ምናሌ",
   "student.switchExam": "ፈተና ቀይር",
+  "student.changeLanguage": "ቋንቋ ቀይር",
+  "student.chooseLanguage": "የሚፈልጉትን ቋንቋ ይምረጡ።",
   "student.currentExam": "የአሁኑ ፈተና፦ {0}",
   "registration.switchExam": "ንቁ የሆነ ፈተና ይምረጡ። ያለፈው ውጤትዎ ይቀመጣል።",
   "student.previous": "ወደ ኋላ",
@@ -188,7 +192,7 @@ const AM = {
   "payment.status.SELECT_METHOD": "የክፍያ ዘዴ ይምረጡ።",
   "payment.status.AWAITING_REFERENCE": "የክፍያ ማስረጃ ጽሑፍ በመጠባበቅ ላይ።",
   "payment.status.AWAITING_RECEIPT": "የክፍያ ማስረጃ ጽሑፍ በመጠባበቅ ላይ።",
-  "payment.status.PENDING_REVIEW": "የአስተዳዳሪ ምርመራ በመጠባበቅ ላይ።",
+  "payment.status.PENDING_REVIEW": "ክፍያዎ በአስተዳዳሪ በእጅ እየተገመገመ ነው።\n\nጥያቄዎን በ24 ሰዓታት ውስጥ እንመረምራለን። ችግር ካለ በቀጥታ እናሳውቅዎታለን።\n\nማስረጃዎ ተቀምጧል፤ ማሻሻል አይቻልም።",
   "payment.status.APPROVED": "ጸድቋል፤ የዕድሜ ልክ መዳረሻ ንቁ ነው።",
   "payment.status.REJECTED": "አልጸደቀም። በአዲስ የግብይት ማጣቀሻ አዲስ ጥያቄ ማቅረብ ይችላሉ።",
   "payment.status.CANCELLED": "ተሰርዟል። የተላከ ማጣቀሻ እንደገና ጥቅም ላይ አይውልም።",
@@ -297,6 +301,15 @@ export function languageKeyboard() {
   ]] };
 }
 
+export function languageChangeKeyboard(language) {
+  return {
+    inline_keyboard: [
+      ...languageKeyboard().inline_keyboard,
+      [button(language, "student.menu", "s:home")],
+    ],
+  };
+}
+
 export function phoneKeyboard(language) {
   return {
     keyboard: [[{ text: message(language, "registration.share"), request_contact: true }]],
@@ -333,6 +346,7 @@ export function completedMenu(view) {
     [button(language, "insights.title", "s:weak:0"), button(language, "insights.practice", "s:recommend")],
     [button(language, grant.accessLevel === "LIFETIME" ? "payment.activeButton" : "payment.upgrade", "pay:open"), button(language, "payment.statusButton", "pay:status")],
     [button(language, "student.switchExam", "s:exams")],
+    [button(language, "student.changeLanguage", "lang:choose")],
   ];
   if (view.grant.activeMockId) rows.push([button(language, "mock.resume", `m:o:${view.grant.activeMockId}:-1`)]);
   const examName = language === "am" && view.examNameAm ? view.examNameAm : view.examName;

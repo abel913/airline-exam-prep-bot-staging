@@ -428,51 +428,59 @@ END $$;
             if (-not $denoCommand) { Stop-Safely 'Deno installed but is unavailable in this PowerShell session.' }
         }
         $failureStage = 'Deno dependency resolution and local PostgreSQL Edge integration test'
-        $denoPreviousErrorPreference = $ErrorActionPreference
-        try {
-            # As with Maven, Windows PowerShell 5.1 may turn native stderr into
-            # a terminating error when the global preference is Stop. Capture
-            # both streams without letting progress text preempt exit checking.
-            $ErrorActionPreference = 'Continue'
-        $denoOutput = @(& $denoCommand.Source test --allow-env=EDGE_TEST_DATABASE_URL --allow-net=127.0.0.1,localhost $testFile $practiceTestFile 2>&1)
-            $denoExitCode = $LASTEXITCODE
-        } finally {
-            $ErrorActionPreference = $denoPreviousErrorPreference
+        $denoFiles = @($practiceTestFile, $testFile)
+        $denoTotalPassed = 0
+        $denoTotalFailed = 0
+        $denoTotalFiles = 0
+        foreach ($denoFile in $denoFiles) {
+            $denoName = Split-Path -Leaf $denoFile
+            $denoPreviousErrorPreference = $ErrorActionPreference
+            try {
+                # Run each PostgreSQL test file in its own completed process to
+                # avoid Deno's Windows test-worker IPC failure with multi-file runs.
+                $ErrorActionPreference = 'Continue'
+                $denoOutput = @(& $denoCommand.Source test --allow-env=EDGE_TEST_DATABASE_URL --allow-net=127.0.0.1,localhost $denoFile 2>&1)
+                $denoExitCode = $LASTEXITCODE
+            } finally {
+                $ErrorActionPreference = $denoPreviousErrorPreference
+            }
+            $denoStdout = [Collections.Generic.List[string]]::new()
+            $denoStderr = [Collections.Generic.List[string]]::new()
+            foreach ($entry in $denoOutput) {
+                if ($entry -is [Management.Automation.ErrorRecord]) { $denoStderr.Add([string]$entry) }
+                else { $denoStdout.Add([string]$entry) }
+            }
+            foreach ($line in $denoStdout) {
+                if (-not [string]::IsNullOrWhiteSpace($line)) { Write-Output "DENO $denoName`: $(Protect-ProcessText $line)" }
+            }
+            foreach ($line in $denoStderr) {
+                if ([string]::IsNullOrWhiteSpace($line)) { continue }
+                $safeLine = Protect-ProcessText $line
+                if ($line -match '(?i)\bwarning\b') { Write-Output "DENO WARNING $denoName`: $safeLine" }
+                elseif ($denoExitCode -eq 0) { Write-Output "DENO STDERR $denoName (exit code 0): $safeLine" }
+                else { Write-Output "DENO STDERR $denoName`: $safeLine" }
+            }
+            Write-Output "Deno process exit code ($denoName): $denoExitCode"
+            $denoSummary = @($denoStdout + $denoStderr | Where-Object { $_ -match '(?i)test result:|^\s*(?:ok|FAILED)\s*\||\d+\s+passed' })
+            $denoPassed = 0; $denoFailed = 0
+            foreach ($summaryLine in $denoSummary) {
+                if ([string]$summaryLine -match '(?i)(?<count>\d+)\s+passed') { $denoPassed += [int]$Matches.count }
+                if ([string]$summaryLine -match '(?i)(?<count>\d+)\s+failed') { $denoFailed += [int]$Matches.count }
+                if ([string]$summaryLine -match '(?i)^\s*FAILED\s*\||test result:\s*FAILED') { $denoFailed = [Math]::Max(1, $denoFailed) }
+            }
+            if ($denoExitCode -ne 0 -or $denoSummary.Count -eq 0 -or $denoPassed -lt 1 -or $denoFailed -gt 0) {
+                Write-Output "DENO_POSTGRES_FILE|$denoName|FAIL"
+                if ($denoSummary.Count -eq 0) { Write-Output "DENO ASSERTIONS EXECUTED ($denoName): 0 (no test summary was emitted)" }
+                foreach ($line in @($denoStdout | Select-Object -Last 30)) { Write-Output "DENO OUTPUT $denoName`: $(Protect-ProcessText $line)" }
+                foreach ($line in @($denoStderr | Select-Object -Last 30)) { Write-Output "DENO STDERR $denoName`: $(Protect-ProcessText $line)" }
+                Stop-Safely "Deno PostgreSQL test file '$denoName' failed or did not report executed assertions (exit code $denoExitCode)."
+            }
+            $denoTotalFiles++
+            $denoTotalPassed += $denoPassed
+            $denoTotalFailed += $denoFailed
+            Write-Output "DENO_POSTGRES_FILE|$denoName|PASS"
         }
-        $denoStdout = [Collections.Generic.List[string]]::new()
-        $denoStderr = [Collections.Generic.List[string]]::new()
-        foreach ($entry in $denoOutput) {
-            if ($entry -is [Management.Automation.ErrorRecord]) { $denoStderr.Add([string]$entry) }
-            else { $denoStdout.Add([string]$entry) }
-        }
-        foreach ($line in $denoStdout) {
-            if (-not [string]::IsNullOrWhiteSpace($line)) { Write-Output "DENO: $(Protect-ProcessText $line)" }
-        }
-        foreach ($line in $denoStderr) {
-            if ([string]::IsNullOrWhiteSpace($line)) { continue }
-            $safeLine = Protect-ProcessText $line
-            if ($line -match '(?i)\bwarning\b') { Write-Output "DENO WARNING: $safeLine" }
-            elseif ($denoExitCode -eq 0) { Write-Output "DENO STDERR (exit code 0): $safeLine" }
-            else { Write-Output "DENO STDERR: $safeLine" }
-        }
-        Write-Output "Deno process exit code: $denoExitCode"
-        if ($denoExitCode -ne 0) {
-            Write-Output 'ERROR: Deno process failed.'
-            foreach ($line in @($denoStdout | Select-Object -Last 30)) { Write-Output "DENO OUTPUT: $(Protect-ProcessText $line)" }
-            foreach ($line in @($denoStderr | Select-Object -Last 30)) { Write-Output "DENO STDERR: $(Protect-ProcessText $line)" }
-            Stop-Safely 'Deno dependency resolution or local PostgreSQL integration test failed; see sanitized output above.'
-        }
-        $denoSummary = @($denoStdout + $denoStderr | Where-Object { $_ -match '(?i)test result:|^\s*(?:ok|FAILED)\s*\||\d+\s+passed' })
-        $denoPassed = 0; $denoFailed = 0
-        foreach ($summaryLine in $denoSummary) {
-            if ([string]$summaryLine -match '(?i)(?<count>\d+)\s+passed') { $denoPassed += [int]$Matches.count }
-            if ([string]$summaryLine -match '(?i)(?<count>\d+)\s+failed') { $denoFailed += [int]$Matches.count }
-            if ([string]$summaryLine -match '(?i)^\s*FAILED\s*\||test result:\s*FAILED') { $denoFailed = [Math]::Max(1, $denoFailed) }
-        }
-        if ($denoSummary.Count -eq 0 -or $denoPassed -lt 1 -or $denoFailed -gt 0) {
-            Stop-Safely 'Deno exited successfully but did not report a successful Phase 4 test result.'
-        }
-        Write-Output "Deno tests: $denoPassed passed; $denoFailed failed."
+        Write-Output "DENO POSTGRESQL INTEGRATION: PASS files=$denoTotalFiles tests=$denoTotalPassed failures=$denoTotalFailed"
         }
     } finally { Pop-Location }
     $failureStage = 'Flyway final-version and synthetic-fixture cleanup verification'

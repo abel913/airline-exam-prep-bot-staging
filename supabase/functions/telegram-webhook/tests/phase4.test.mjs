@@ -207,6 +207,7 @@ test("full multiline transaction proof preserves newlines and receipt URL and be
  assert.equal(req.status,"PENDING_REVIEW");assert.equal(req.payment_proof_text,proof);
  assert.equal(req.reference,null);assert.equal(req.receipt_file_id,null);assert.equal(req.receipt_unique_id,null);
  assert.equal(sent.at(-1)[1].includes(PROOF_GUIDANCE),false);
+ assert.ok(sent.at(-1)[1].includes("Status: Pending manual review.\n\nWe will review your request within 24 hours. If there is any issue, we will contact you directly.\n\nYour evidence is saved and cannot be edited."));
  assert.equal(f.state.notifications.length,1);assert.equal(f.state.audit.filter(e=>e.action==="PAYMENT_SUBMITTED_FOR_REVIEW").length,1);
  assert.equal(JSON.stringify(f.state.audit).includes("provider.example"),false);
  await flow.message("10","tg",{text:proof},"synthetic-update-1");
@@ -219,6 +220,16 @@ test("reference-only proof populates legacy reference fields and becomes pending
  assert.equal(req.payment_proof_text,"TEST-REF-001");assert.equal(req.reference,"TEST-REF-001");
  assert.equal(req.normalized_reference,"TEST-REF-001");assert.equal(req.status,"PENDING_REVIEW");
  assert.equal(req.receipt_file_id,null);
+});
+test("Amharic pending confirmation promises review within 24 hours without promising approval",async()=>{
+ const f=paymentFixture();f.state.students.get("tg").language="am";
+ const {flow,sent,req}=await selectedPaymentFlow(f);
+ await flow.message("10","tg",{text:"TEST-REF-AM-001"},"synthetic-am-proof");
+ assert.equal(req.status,"PENDING_REVIEW");
+ assert.match(sent.at(-1)[1],/24 ሰዓታት ውስጥ/);
+ assert.match(sent.at(-1)[1],/በቀጥታ እናሳውቅዎታለን/);
+ assert.match(sent.at(-1)[1],/ማስረጃዎ ተቀምጧል/);
+ assert.doesNotMatch(sent.at(-1)[1],/payment\.status\.PENDING_REVIEW/);
 });
 test("blank text is rejected and photo or document is not accepted while awaiting new proof",async()=>{
  for(const body of [{text:" \n \t"},{photo:[{file_id:"synthetic"}]},{document:{file_id:"synthetic"}}]){
