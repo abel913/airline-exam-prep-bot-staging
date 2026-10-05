@@ -10,8 +10,15 @@ const home=lang=>[[button(lang,"student.menu","s:home","Menu")]];
 const allowance=s=>s.accessLevel==="LIFETIME"?message(s.language,"student.unlimited"):
   message(s.language,"student.remaining",Math.max(0,s.mockLimit-s.mocksUsed),s.mockLimit);
 const content=q=>q.text+"\n\n"+q.options.map(o=>String.fromCharCode(65+o.position)+". "+o.text).join("\n");
+function timed(lang,seconds){
+  if(seconds===null||seconds===undefined)return "";
+  const value=Math.max(0,Math.floor(seconds));
+  const time=`${String(Math.floor(value/3600)).padStart(2,"0")}:${String(Math.floor(value%3600/60)).padStart(2,"0")}:${String(value%60).padStart(2,"0")}`;
+  return message(lang,"mock.countdown",time);
+}
 function introView(v){
   const s=v.student,lang=s.language;
+  if(v.expired)return attemptView(v.expired);
   if(v.active)return {text:message(lang,"mock.active"),reply_markup:{inline_keyboard:[
     [button(lang,"mock.resume","m:o:"+v.active.id+":-1"),button(lang,"student.menu","s:home")]]}};
   if(s.accessLevel!=="LIFETIME"&&s.mockLimit-s.mocksUsed<=0)
@@ -22,8 +29,17 @@ function introView(v){
 }
 function attemptView(v){
   const s=v.student,a=v.attempt,i=v.item,q=v.question,lang=s.language;
+  if(a.status==="EXPIRED"){
+    const answered=v.score?Math.max(0,v.score.total-v.score.unanswered):0;
+    const unanswered=v.score?.unanswered??a.count;
+    return {text:message(lang,"mock.timeUp")+"\n\n"+message(lang,"mock.expiryCounts",answered,unanswered),reply_markup:{inline_keyboard:[
+      [button(lang,"mock.restart","m:s:"+crypto.randomUUID())],
+      [button(lang,"mock.historyButton","s:mh:0")],...home(lang)]}};
+  }
   if(a.status==="READY")return {text:message(lang,"mock.ready",a.count),reply_markup:{inline_keyboard:[
     [button(lang,"mock.open","m:o:"+a.id+":0")],...home(lang)]}};
+  if(v.completion)return {text:message(lang,"mock.completion",timed(lang,v.secondsRemaining),v.counts.answered,v.counts.unanswered),reply_markup:{inline_keyboard:[
+    [button(lang,"mock.review","m:o:"+a.id+":0"),button(lang,"mock.submit","m:f:"+a.id)],...home(lang)]}};
   if(v.score){
     let text=message(lang,"mock.result",v.score.correct,v.score.total,v.score.percentage,v.score.incorrect,v.score.unanswered)+"\n"+allowance(s);
     for(const c of v.score.categories)text+="\n"+message(lang,"mock.category",c.name,c.correct,c.total,c.incorrect,c.unanswered,c.percentage);
@@ -33,21 +49,21 @@ function attemptView(v){
     return {text,reply_markup:{inline_keyboard:rows}};
   }
   let text=message(lang,"mock.position",i.sequence+1,a.count)+"\n"+content(q),rows=[];
-  if(v.review){
+  if(v.secondsRemaining!==null&&a.status==="IN_PROGRESS")text+="\n"+timed(lang,v.secondsRemaining);
+  if(v.review&&a.status!=="IN_PROGRESS"){
     const correct=q.options.find(o=>o.correct),selected=i.selected===null?null:q.options.find(o=>o.position===i.selected);
     text+="\n"+message(lang,"student.selected",selected===null?message(lang,"mock.unanswered"):String.fromCharCode(65+i.selected))+
       "\n"+message(lang,"student.correctAnswer",String.fromCharCode(65+correct.position))+
       "\n"+message(lang,i.selected===null?"mock.unanswered":selected.correct?"practice.correct":"practice.incorrect")+"\n"+q.explanation;
   }else{
-    if(v.secondsRemaining!==null)text+="\n"+message(lang,"mock.seconds",v.secondsRemaining);
     if(i.selected!==null)text+="\n"+message(lang,"student.selected",String.fromCharCode(65+i.selected));
     rows.push(q.options.map(o=>button(lang,String.fromCharCode(65+o.position),"m:a:"+a.id+":"+i.sequence+":"+o.position+":"+i.revision,String.fromCharCode(65+o.position))));
   }
-  const prefix=v.review?"m:r:":"m:o:",nav=[];
+  const prefix=v.review&&a.status!=="IN_PROGRESS"?"m:r:":"m:o:",nav=[];
   if(i.sequence>0)nav.push(button(lang,"student.previous",prefix+a.id+":"+(i.sequence-1)));
   if(i.sequence+1<a.count)nav.push(button(lang,"student.next",prefix+a.id+":"+(i.sequence+1)));
   if(nav.length)rows.push(nav);
-  rows.push([button(lang,v.review?"mock.resultButton":"mock.submit","m:f:"+a.id)],...home(lang));
+  rows.push([button(lang,v.review&&a.status!=="IN_PROGRESS"?"mock.resultButton":"mock.submit","m:f:"+a.id)],...home(lang));
   return {text,reply_markup:{inline_keyboard:rows}};
 }
 function historyView(r){
@@ -92,9 +108,14 @@ export function createMockFlow(service,telegram){
         if(!validId(m[2]))throw new MockError("student.invalid");
         await send(telegram,chat,attemptView(await service.open(tg,m[2],m[3]==="-1"?null:Number(m[3]),m[1]==="r")));return;
       }
+      if((m=/^m:c:([1-9][0-9]{0,18})$/.exec(data))){
+        if(!validId(m[1]))throw new MockError("student.invalid");
+        await send(telegram,chat,attemptView(await service.completion(tg,m[1])));return;
+      }
       if((m=/^m:a:([1-9][0-9]{0,18}):([0-9]{1,3}):([0-7]):([0-9]{1,9})$/.exec(data))){
         if(!validId(m[1]))throw new MockError("student.invalid");
-        await send(telegram,chat,attemptView(await service.answer(tg,m[1],Number(m[2]),Number(m[3]),Number(m[4]))));return;
+        const result=await service.answer(tg,m[1],Number(m[2]),Number(m[3]),Number(m[4]));
+        if(!result.duplicate)await send(telegram,chat,attemptView(result));return;
       }
       if((m=/^m:f:([1-9][0-9]{0,18})$/.exec(data))){
         if(!validId(m[1]))throw new MockError("student.invalid");
@@ -103,7 +124,7 @@ export function createMockFlow(service,telegram){
       throw new MockError("student.invalid");
     }catch(e){
       if(!(e instanceof MockError))throw e;
-      await telegram.sendMessage(chat,message(lang,e.key),{inline_keyboard:home(lang)});
+        await telegram.sendMessage(chat,message(lang,e.key,...(e.args??[])),{inline_keyboard:home(lang)});
     }
   }};
 }

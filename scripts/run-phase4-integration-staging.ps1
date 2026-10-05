@@ -14,6 +14,7 @@ $adminDb = 'postgres'
 $root = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
 $testFile = Join-Path $root 'supabase/functions/telegram-webhook/tests/phase4.postgres.test.ts'
 $practiceTestFile = Join-Path $root 'supabase/functions/telegram-webhook/tests/practice.postgres.test.ts'
+$mockTestFile = Join-Path $root 'supabase/functions/telegram-webhook/tests/mock.postgres.test.ts'
 $javaTests = @(
     (Join-Path $root 'src/test/java/com/airlineprep/bot/payment/Phase4PostgresIT.java'),
     (Join-Path $root 'src/test/java/com/airlineprep/bot/payment/PaymentPostgresIT.java'),
@@ -91,6 +92,7 @@ try {
     }
     $failureStage = 'Flyway migration inventory'
     if (-not (Test-Path -LiteralPath $testFile) -or -not (Test-Path -LiteralPath $practiceTestFile) -or
+        -not (Test-Path -LiteralPath $mockTestFile) -or
         @($javaTests | Where-Object { -not (Test-Path -LiteralPath $_) }).Count -gt 0) { Stop-Safely 'Phase 5 integration test source is missing.' }
     $sqlMigrations = @(Get-ChildItem (Join-Path $root 'src/main/resources/db/migration') -Filter 'V*__*.sql' -File |
         ForEach-Object { if ($_.Name -match '^V([0-9]+)__') { [int]$Matches[1] } } | Sort-Object -Unique)
@@ -428,7 +430,7 @@ END $$;
             if (-not $denoCommand) { Stop-Safely 'Deno installed but is unavailable in this PowerShell session.' }
         }
         $failureStage = 'Deno dependency resolution and local PostgreSQL Edge integration test'
-        $denoFiles = @($practiceTestFile, $testFile)
+        $denoFiles = @($practiceTestFile, $testFile, $mockTestFile)
         $denoTotalPassed = 0
         $denoTotalFailed = 0
         $denoTotalFiles = 0

@@ -117,6 +117,7 @@ jobs:
           deno check
           supabase/functions/telegram-webhook/tests/practice.postgres.test.ts
           supabase/functions/telegram-webhook/tests/phase4.postgres.test.ts
+          supabase/functions/telegram-webhook/tests/mock.postgres.test.ts
 
       - name: Run each Deno PostgreSQL file sequentially
         shell: bash
@@ -165,5 +166,12 @@ jobs:
           phase4_tests="$(printf '%s\n' "$phase4_result" | tail -n 1)"
           printf '%s\n' "$phase4_result" | sed '$d'
 
-          total_tests=$((practice_tests + phase4_tests))
-          echo "DENO POSTGRESQL INTEGRATION: PASS files=2 tests=$total_tests failures=0"
+          if ! mock_result="$(run_postgres_file 'MOCK TIMER/AUTO-NEXT/UNIQUENESS POSTGRES' 'supabase/functions/telegram-webhook/tests/mock.postgres.test.ts')"; then
+            echo "MOCK TIMER/AUTO-NEXT/UNIQUENESS POSTGRES: FAIL"
+            exit 1
+          fi
+          mock_tests="$(printf '%s\n' "$mock_result" | tail -n 1)"
+          printf '%s\n' "$mock_result" | sed '$d'
+
+          total_tests=$((practice_tests + phase4_tests + mock_tests))
+          echo "DENO POSTGRESQL INTEGRATION: PASS files=3 tests=$total_tests failures=0"

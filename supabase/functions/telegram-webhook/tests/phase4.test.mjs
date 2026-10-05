@@ -6,22 +6,26 @@ import { createMockFlow } from "../mock-flow.mjs";
 import { createPaymentFlow } from "../payment-flow.mjs";
 import { message } from "../domain.mjs";
 
-function fixture({duration=2,questions=2,limit=2}={}){
-  const state={now:1000000,next:1,attempts:new Map(),items:new Map(),used:0,limit,duration,
+function fixture({duration=2,questions=2,limit=2,pool=3}={}){
+  const state={now:1000000,next:1,attempts:new Map(),items:new Map(),used:0,limit,duration,pool,language:"en",
     active:null,studentId:"10",foreignId:"20"};
-  const question=(id)=>({id:String(id),versionId:"v"+id,examId:"1",categoryId:"3",categoryName:"Synthetic",
+  const question=(id,examId="1")=>({id:String(id),versionId:"v"+id,examId:String(examId),categoryId:"3",categoryName:"Synthetic",
     text:"Synthetic question "+id,explanation:"Original explanation",options:[
       {position:0,text:"Correct",correct:true},{position:1,text:"Incorrect",correct:false}]});
-  const versions=new Map([[1,question(1)],[2,question(2)],[3,question(3)]]);
-  const student=(id=state.studentId)=>({id,telegramId:id,examId:"1",language:"en",accessLevel:"FREE",
+  const versions=new Map(Array.from({length:pool},(_,i)=>[i+1,question(i+1)]));
+  const student=(id=state.studentId,examId="1")=>({id,telegramId:id,examId:String(examId),language:state.language,accessLevel:"FREE",
     practiceLimit:100,practiceUsed:0,mockLimit:limit,mocksUsed:state.used,questionsPerMock:questions});
   const unit={
-    async student(tg){return tg==="tg"?student():tg==="other"?student(state.foreignId):null;},
+    async student(tg){return tg==="tg"?student():tg==="other"?student(state.foreignId):tg==="exam-b"?student(state.studentId,"2"):null;},
     async duration(){return state.duration;},
-    async own(s,id){const a=state.attempts.get(String(id));return a&&a.user_id===s.id?a:null;},
-    async active(s){return [...state.attempts.values()].find(a=>a.active_user_id===s.id)??null;},
-    async creation(s,key){return [...state.attempts.values()].find(a=>a.user_id===s.id&&a.creation_key===key)??null;},
-    async eligible(_s,count){return Array.from({length:Math.min(count,3)},(_,i)=>({question_id:String(i+1),version_id:"v"+(i+1)}));},
+    async own(s,id){const a=state.attempts.get(String(id));return a&&a.user_id===s.id&&a.exam_type_id===s.examId?a:null;},
+    async active(s){return [...state.attempts.values()].find(a=>a.active_user_id===s.id&&a.exam_type_id===s.examId)??null;},
+    async creation(s,key){return [...state.attempts.values()].find(a=>a.user_id===s.id&&a.exam_type_id===s.examId&&a.creation_key===key)??null;},
+    async eligibleCount(s){return Array.from({length:state.pool},(_,i)=>String(i+1)).filter(id=>![...state.attempts.values()]
+      .filter(a=>a.user_id===s.id&&a.exam_type_id===s.examId).some(a=>(state.items.get(a.id)??[]).some(item=>item.question_id===id))).length;},
+    async eligible(s,count){return Array.from({length:state.pool},(_,i)=>String(i+1)).filter(id=>![...state.attempts.values()]
+      .filter(a=>a.user_id===s.id&&a.exam_type_id===s.examId).some(a=>(state.items.get(a.id)??[]).some(item=>item.question_id===id)))
+      .slice(0,count).map(id=>({question_id:id,version_id:"v"+id}));},
     async create(s,key,duration){const id=String(state.next++),a={id,user_id:s.id,exam_type_id:s.examId,status:"READY",
       active_user_id:s.id,creation_key:key,question_count:questions,duration_minutes:duration,cursor_position:0,
       started_at:null,deadline_at:null,first_answer_at:null,submitted_at:null,correct_count:null,incorrect_count:null,unanswered_count:null};
@@ -39,8 +43,9 @@ function fixture({duration=2,questions=2,limit=2}={}){
       if(!i||i.answer_revision!==rev)return false;
       if(x.first_answer_at===null){if(s.accessLevel!=="LIFETIME"){if(state.used>=state.limit)throw new Error("MOCK_LIMIT");state.used++;}
         x.first_answer_at=state.now;}
-      i.selected_option=opt;i.answer_revision++;return true;},
-    async move(a,seq){state.attempts.get(a).cursor_position=seq;},
+      i.selected_option=opt;i.answer_revision++;x.cursor_position=seq+1<x.question_count?seq+1:seq;return true;},
+    async move(a,seq){state.attempts.get(a).cursor_position=seq;return true;},
+    async answerCounts(a){const items=state.items.get(a);return{answered:items.filter(i=>i.selected_option!==null).length,unanswered:items.filter(i=>i.selected_option===null).length};},
     async score(a){const items=state.items.get(a),categories=[{id:"3",name:"Synthetic",total:items.length,
       correct:items.filter(i=>i.selected_option===0).length,incorrect:items.filter(i=>i.selected_option===1).length,
       unanswered:items.filter(i=>i.selected_option===null).length}];
@@ -123,6 +128,9 @@ test("mock answer and review render the localized selected-answer label",async()
  await flow.callback("chat","tg",openData,"2");
  const answerData=sent.at(-1).markup.inline_keyboard[0][0].callback_data;
  await flow.callback("chat","tg",answerData,"3");
+ assert.match(sent.at(-1).text,/You reached the end of the mock/);
+ const review=sent.at(-1).markup.inline_keyboard.flat().find(b=>b.callback_data.startsWith("m:o:"));
+ await flow.callback("chat","tg",review.callback_data,"4");
  assert.match(sent.at(-1).text,/Your answer: A/);
  assert.doesNotMatch(sent.at(-1).text,/student\.selected/);
 });
@@ -142,12 +150,112 @@ test("zero-answer timeout does not consume allowance and late answers are reject
  const result=await f.service.answer("tg",id,0,0,0);
  assert.equal(result.attempt.status,"EXPIRED");assert.equal(f.state.used,0);assert.equal(result.question,null);
 });
+test("mock answers auto-advance once, retries stay on the persisted position, and last answer opens completion",async()=>{
+ const f=fixture({questions:3,pool:8}),sent=[];
+ const flow=createMockFlow(f.service,{async sendMessage(_chat,text,markup){sent.push({text,markup});}});
+ await flow.callback("chat","tg","m:s:auto-next","1");
+ const ready=sent.at(-1).markup.inline_keyboard.flat().find(b=>b.callback_data.startsWith("m:o:")).callback_data;
+ await flow.callback("chat","tg",ready,"2");
+ const answerButton=()=>sent.at(-1).markup.inline_keyboard.flat().find(b=>/^m:a:/.test(b.callback_data));
+ const q1=answerButton().callback_data;
+ await flow.callback("chat","tg",q1,"3");
+ assert.match(sent.at(-1).text,/Question 2 of 3/);
+ const q2=answerButton().callback_data;
+ await flow.callback("chat","tg",q2,"4");
+ assert.match(sent.at(-1).text,/Question 3 of 3/);
+ const sentAfterAcceptedQ2=sent.length;
+ await flow.callback("chat","tg",q2,"4");
+ assert.equal(sent.length,sentAfterAcceptedQ2,"a retried stale callback does not render the next question twice");
+ assert.equal(f.state.items.get("1").filter(i=>i.selected_option!==null).length,2);
+ assert.equal(f.state.attempts.get("1").cursor_position,2);
+ const q3=answerButton().callback_data;
+ await flow.callback("chat","tg",q3,"5");
+ assert.match(sent.at(-1).text,/You reached the end of the mock/);
+ assert.match(sent.at(-1).text,/Answered: 3/);
+ assert.equal(f.state.attempts.get("1").status,"IN_PROGRESS","last answer must not auto-submit");
+ assert.equal(f.state.items.get("1").filter(i=>i.selected_option!==null).length,3);
+});
+test("mock Previous and Next skip without creating mock items",async()=>{
+ const f=fixture({questions:3,pool:8});const ready=await f.service.prepare("tg","navigation");
+ await f.service.open("tg",ready.attempt.id,0);
+ const next=await f.service.open("tg",ready.attempt.id,1);
+ assert.equal(next.item.sequence,1);assert.equal(next.item.selected,null);
+ const previous=await f.service.open("tg",ready.attempt.id,0);
+ assert.equal(previous.item.sequence,0);assert.equal(f.state.items.get(ready.attempt.id).length,3);
+ assert.equal(f.state.items.get(ready.attempt.id).filter(i=>i.selected_option!==null).length,0);
+});
+test("two-hour countdown is formatted from the persisted server deadline and survives resume and language switch",async()=>{
+ const f=fixture({duration:120,questions:2,pool:6});const ready=await f.service.prepare("tg","two-hours");
+ const opened=await f.service.open("tg",ready.attempt.id,0),deadline=opened.attempt.deadline;
+ assert.equal(opened.secondsRemaining,7200);
+ const sent=[];const flow=createMockFlow(f.service,{async sendMessage(_chat,text,markup){sent.push({text,markup});}});
+ await flow.callback("chat","tg","m:o:"+ready.attempt.id+":0","timer");
+ assert.match(sent.at(-1).text,/Time remaining: 02:00:00/);
+ f.state.now+=3660*1000;f.state.language="am";
+ const resumed=await f.service.open("tg",ready.attempt.id);
+ assert.equal(resumed.attempt.deadline,deadline);assert.equal(resumed.secondsRemaining,3540);
+ assert.equal(resumed.student.language,"am");assert.equal(f.state.items.get(ready.attempt.id).length,2);
+});
+test("expiry rejects answer, navigation, resume and submit; zero answers stay free and restart preserves history",async()=>{
+ const f=fixture({duration:1,questions:1,pool:3});const ready=await f.service.prepare("tg","expiry-old"),oldId=ready.attempt.id;
+ await f.service.open("tg",oldId,0);f.state.now+=60000;
+ const expired=await f.service.answer("tg",oldId,0,0,0);
+ assert.equal(expired.attempt.status,"EXPIRED");assert.equal(f.state.used,0);
+ assert.equal((await f.service.open("tg",oldId,0)).attempt.status,"EXPIRED");
+ assert.equal((await f.service.submit("tg",oldId)).attempt.status,"EXPIRED");
+ const sent=[];const flow=createMockFlow(f.service,{async sendMessage(_chat,text,markup){sent.push({text,markup});}});
+ await flow.callback("chat","tg","m:o:"+oldId+":0","expired-screen");
+ assert.match(sent.at(-1).text,/Time is up\. Your mock exam has expired/);
+ const restart=sent.at(-1).markup.inline_keyboard.flat().find(b=>b.text==="Restart Mock Exam");
+ await flow.callback("chat","tg",restart.callback_data,"restart");
+ const newId=sent.at(-1).markup.inline_keyboard.flat().find(b=>b.callback_data.startsWith("m:o:")).callback_data.split(":")[2];
+ assert.notEqual(newId,oldId);assert.equal(f.state.attempts.get(oldId).status,"EXPIRED");
+ assert.equal((await f.service.history("tg")).rows.some(row=>row.id===oldId&&row.status==="EXPIRED"),true);
+ assert.equal(f.state.used,0);
+});
+test("expired submission and all-expired navigation remain closed after one answer; charge is not refunded",async()=>{
+ const f=fixture({duration:1,questions:2,pool:5}),ready=await f.service.prepare("tg","expiry-answered"),id=ready.attempt.id;
+ await f.service.open("tg",id,0);await f.service.answer("tg",id,0,0,0);assert.equal(f.state.used,1);
+ f.state.now+=60000;
+ for(const v of [await f.service.answer("tg",id,1,0,0),await f.service.open("tg",id,0),await f.service.open("tg",id,1),await f.service.submit("tg",id)])
+  assert.equal(v.attempt.status,"EXPIRED");
+ assert.equal(f.state.used,1);
+});
+test("frozen logical questions are excluded across attempts per user and exam, but allowed for another user",async()=>{
+ const f=fixture({duration:1,questions:2,pool:6});const first=await f.service.prepare("tg","unseen-one");
+ const original=f.state.items.get(first.attempt.id).map(i=>i.question_id);
+ await f.service.open("tg",first.attempt.id,0);f.state.now+=60000;
+ await f.service.open("tg",first.attempt.id,0);
+ const second=await f.service.prepare("tg","unseen-two");
+ const nextIds=f.state.items.get(second.attempt.id).map(i=>i.question_id);
+ assert.equal(original.some(id=>nextIds.includes(id)),false);
+ await f.service.open("tg",second.attempt.id,0);f.state.now+=60000;await f.service.open("tg",second.attempt.id,0);
+ const otherUser=await f.service.prepare("other","other-user");
+ assert.ok(f.state.items.get(otherUser.attempt.id).some(i=>original.includes(i.question_id)));
+ await f.service.open("other",otherUser.attempt.id,0);f.state.now+=60000;await f.service.open("other",otherUser.attempt.id,0);
+ const otherExam=await f.service.prepare("exam-b","other-exam");
+ assert.ok(f.state.items.get(otherExam.attempt.id).some(i=>original.includes(i.question_id)));
+});
+test("question-pool exhaustion gives exact counts and concurrent preparation remains one attempt",async()=>{
+ const short=fixture({duration:1,questions:2,pool:3}),one=await short.service.prepare("tg","pool-first");
+ await short.service.open("tg",one.attempt.id,0);short.state.now+=60000;await short.service.open("tg",one.attempt.id,0);
+ await assert.rejects(short.service.prepare("tg","pool-short"),e=>e instanceof MockError&&e.key==="mock.insufficient"&&e.args[0]===1&&e.args[1]===2);
+ assert.equal(short.state.attempts.size,1);
+ const concurrent=fixture({questions:2,pool:5});
+ const pair=await Promise.all([concurrent.service.prepare("tg","parallel-a"),concurrent.service.prepare("tg","parallel-b")]);
+ assert.equal(pair[0].attempt.id,pair[1].attempt.id);assert.equal(concurrent.state.attempts.size,1);
+ assert.equal(new Set(concurrent.state.items.get(pair[0].attempt.id).map(i=>i.question_id)).size,2);
+});
+test("new mock timer, expiry, completion and pool messages have English and Amharic translations",()=>{
+ for(const lang of ["en","am"])for(const key of ["mock.countdown","mock.completion","mock.insufficient","mock.timeUp","mock.restart","mock.historyButton"])
+  assert.notEqual(message(lang,key,"02:00:00",2,1),key,`${lang} translation missing for ${key}`);
+});
 test("mock ownership, invalid frozen option, and shortage fail closed",async()=>{
  const f=fixture();const a=await f.service.prepare("tg","owned-key");
  await assert.rejects(f.service.open("other",a.attempt.id),e=>e instanceof MockError&&e.key==="student.invalid");
  await f.service.open("tg",a.attempt.id,0);
  await assert.rejects(f.service.answer("tg",a.attempt.id,0,7,0),e=>e instanceof MockError&&e.key==="student.invalid");
- const short=fixture({questions:5});await assert.rejects(short.service.prepare("tg","short-key"),e=>e instanceof MockError&&e.key==="mock.empty");
+ const short=fixture({questions:5});await assert.rejects(short.service.prepare("tg","short-key"),e=>e instanceof MockError&&e.key==="mock.insufficient"&&e.args[0]===3&&e.args[1]===5);
  assert.equal(short.state.used,0);assert.equal(short.state.attempts.size,0);
 });
 test("payment references mirror Spring normalization and validation",()=>{
