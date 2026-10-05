@@ -1,7 +1,6 @@
 export class PaymentError extends Error{
  constructor(key){super(key);this.name="PaymentError";this.key=key;}
 }
-const openStatus=new Set(["SELECT_METHOD","AWAITING_REFERENCE","AWAITING_RECEIPT","PENDING_REVIEW"]);
 const cancellable=new Set(["SELECT_METHOD","AWAITING_REFERENCE","AWAITING_RECEIPT"]);
 const enabled=c=>Boolean(c?.payment_enabled&&c?.manual_payment_enabled);
 const sid=v=>String(v);
@@ -9,7 +8,7 @@ const viewOf=(s,p,c,methods=[],page=0,history=[])=>({student:s,request:p,enabled
  price:String(c?.lifetime_price??0),currency:c?.currency??"",support:c?.support_info??"",methods,page,history});
 function mapStatus(row){return row?{id:String(row.id),userId:String(row.user_id),examId:String(row.target_exam_type_id),status:row.status,amount:String(row.amount),currency:row.currency,
  methodId:row.method_id===null?null:String(row.method_id),methodType:row.method_type,methodName:row.method_name,
- accountName:row.account_name,destination:row.destination,instructions:row.instructions,reference:row.reference,
+ accountName:row.account_name,destination:row.destination,instructions:row.instructions,reference:row.reference,paymentProofText:row.payment_proof_text,
  receipt:row.receipt_file_id===null?null:{fileId:row.receipt_file_id,uniqueId:row.receipt_unique_id,type:row.receipt_type,
   filename:row.receipt_filename,mime:row.receipt_mime,size:Number(row.receipt_size)},
  created:new Date(row.created_at).toISOString(),submitted:row.submitted_at,rejectionReason:row.rejection_reason}:null;}
@@ -35,11 +34,11 @@ export class PaymentService{
   return await this.store.withAction(async u=>{
    const s=await u.studentForExam(tg,String(targetExam));if(!s)throw new PaymentError("student.invalid");
    if(s.accessLevel==="LIFETIME")throw new PaymentError("payment.lifetime");
-   const c=await u.config();let p=await u.creation(s.id,s.examId,key);if(p)return viewOf(s,mapStatus(p),c,[],0,[]);
-   p=await u.open(s.id);if(p){if(sid(p.target_exam_type_id)!==s.examId)throw new PaymentError("payment.state");return viewOf(s,mapStatus(p),c,[],0,[]);}
+   const c=await u.config();let p=await u.creation(s.id,s.examId,key);if(p)return await this.viewForRequest(u,s,p,c);
+   p=await u.open(s.id);if(p){if(sid(p.target_exam_type_id)!==s.examId)throw new PaymentError("payment.state");return await this.viewForRequest(u,s,p,c);}
    if(!enabled(c))throw new PaymentError("payment.disabled");
    const id=await u.create(s,key,c);p=await u.request(id,s.id,s.examId);
-   return viewOf(s,mapStatus(p),c,[],0,[]);
+   return await this.viewForRequest(u,s,p,c);
   });
  }
  async methods(tg,request,page){if(!Number.isSafeInteger(page)||page<0||page>1000000)throw new PaymentError("student.invalid");
@@ -48,6 +47,10 @@ export class PaymentService{
    if(p.status!=="SELECT_METHOD")throw new PaymentError("payment.state");
    const c=await u.config();return viewOf(s,mapStatus(p),c,enabled(c)?await u.methods(page):[],page,[]);
   },request);
+ }
+ async viewForRequest(unit,student,request,config){
+  const methods=request?.status==="SELECT_METHOD"&&enabled(config)?await unit.methods(0):[];
+  return viewOf(student,mapStatus(request),config,methods,0,[]);
  }
  async select(tg,request,method){return await this.withStudent(tg,async(u,s)=>{
    const p=await u.request(request,s.id,s.examId);if(!p)throw new PaymentError("payment.notFound");
@@ -62,6 +65,26 @@ export class PaymentService{
   if(typeof input!=="string")throw new PaymentError("payment.referenceInvalid");
   const value=input.trim();if(!/^[A-Za-z0-9][A-Za-z0-9._/-]{2,99}$/.test(value))throw new PaymentError("payment.referenceInvalid");
   return {raw:value,normalized:value.toUpperCase()};
+ }
+ static normalizeProof(input){
+  if(typeof input!=="string")throw new PaymentError("payment.proofInvalid");
+  const proof=input.trim();
+  if(!proof||proof.length>4096||proof.includes("\0"))throw new PaymentError("payment.proofInvalid");
+  return proof;
+ }
+ async submitProof(tg,request,input){return await this.withStudent(tg,async(u,s)=>{
+   const p=await u.request(request,s.id,s.examId);if(!p)throw new PaymentError("payment.notFound");
+   const proof=PaymentService.normalizeProof(input),c=await u.config();
+   if(p.status==="PENDING_REVIEW"&&proof===p.payment_proof_text)return viewOf(s,mapStatus(p),c,[],0,[]);
+   if(p.status!=="AWAITING_REFERENCE"&&p.status!=="AWAITING_RECEIPT")throw new PaymentError("payment.state");
+   let reference=null,normalized=null;
+   try{({raw:reference,normalized}=PaymentService.normalizeReference(proof));}catch(e){if(!(e instanceof PaymentError))throw e;}
+   if(normalized&&await u.referenceExists(normalized,request))throw new PaymentError("payment.duplicateReference");
+   await u.saveProof(request,proof,reference,normalized);
+   await u.recordProofSubmitted(s.id,request);
+   await u.enqueueAdmin(request,s.language,this.adminId);
+   return viewOf(s,mapStatus(await u.request(request,s.id,s.examId)),c,[],0,[]);
+  },request);
  }
  async reference(tg,request,input){return await this.withStudent(tg,async(u,s)=>{
    const p=await u.request(request,s.id,s.examId);if(!p)throw new PaymentError("payment.notFound");

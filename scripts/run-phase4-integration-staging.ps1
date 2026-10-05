@@ -2,11 +2,13 @@
 param(
     [ValidateSet('Phase4AndRemoval','RemovalOnly')]
     [string]$PostgresTestSet = 'Phase4AndRemoval',
-    [switch]$JavaOnly
+    [switch]$JavaOnly,
+    [ValidateSet('airline_exam_bot_phase5_test','airline_exam_bot_phase5_v20_fresh_test','airline_exam_bot_phase5_v20_final_test','airline_exam_bot_phase5_v20_verify_test')]
+    [string]$DatabaseName = 'airline_exam_bot_phase5_v20_verify_test'
 )
 
 $ErrorActionPreference = 'Stop'
-$dbName = 'airline_exam_bot_phase5_test'
+$dbName = $DatabaseName
 $runner = 'airline_exam_bot_phase5_runner'
 $adminDb = 'postgres'
 $root = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
@@ -14,6 +16,7 @@ $testFile = Join-Path $root 'supabase/functions/telegram-webhook/tests/phase4.po
 $practiceTestFile = Join-Path $root 'supabase/functions/telegram-webhook/tests/practice.postgres.test.ts'
 $javaTests = @(
     (Join-Path $root 'src/test/java/com/airlineprep/bot/payment/Phase4PostgresIT.java'),
+    (Join-Path $root 'src/test/java/com/airlineprep/bot/payment/PaymentPostgresIT.java'),
     (Join-Path $root 'src/test/java/com/airlineprep/bot/admin/RegisteredUserRemovalPostgresIT.java')
 )
 $oldEnv = @{}
@@ -93,9 +96,9 @@ try {
         ForEach-Object { if ($_.Name -match '^V([0-9]+)__') { [int]$Matches[1] } } | Sort-Object -Unique)
     $javaMigrations = @(Get-ChildItem (Join-Path $root 'src/main/java/db/migration') -Filter 'V*__*.java' -File |
         ForEach-Object { if ($_.Name -match '^V([0-9]+)__') { [int]$Matches[1] } } | Sort-Object -Unique)
-    if (($sqlMigrations + $javaMigrations | Sort-Object -Unique).Count -ne 19 -or
-        ($sqlMigrations + $javaMigrations | Sort-Object -Unique)[-1] -ne 19 -or
-        16 -notin $javaMigrations -or 17 -notin $javaMigrations -or 18 -notin $javaMigrations -or 19 -notin $javaMigrations) { Stop-Safely 'Expected the complete SQL and Java Flyway migration set V1–V19.' }
+    if (($sqlMigrations + $javaMigrations | Sort-Object -Unique).Count -ne 20 -or
+        ($sqlMigrations + $javaMigrations | Sort-Object -Unique)[-1] -ne 20 -or
+        16 -notin $javaMigrations -or 17 -notin $javaMigrations -or 18 -notin $javaMigrations -or 19 -notin $javaMigrations) { Stop-Safely 'Expected the complete SQL and Java Flyway migration set V1–V20.' }
 
     $failureStage = 'local PostgreSQL service and client discovery'
     $service = Get-Service -Name 'postgresql-x64-18' -ErrorAction SilentlyContinue
@@ -153,8 +156,8 @@ try {
         $hasFlyway = Invoke-LocalPsql $dbName "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema='public' AND table_name='flyway_schema_history';" -Quiet
         if ($hasFlyway -ne '1') { Stop-Safely 'The existing named test database contains tables but no Flyway history; refusing to overwrite unknown data.' }
         $version = Invoke-LocalPsql $dbName "SELECT COALESCE(MAX(version::int),0) FROM flyway_schema_history WHERE success;" -Quiet
-        if ([int]$version -gt 19) { Stop-Safely 'The isolated test database has a migration newer than V19.' }
-        if ([int]$version -notin @(17,18,19)) { Stop-Safely 'The isolated test database must be at Flyway V17, V18, or V19 before synthetic cleanup is considered.' }
+        if ([int]$version -gt 20) { Stop-Safely 'The isolated test database has a migration newer than V20.' }
+        if ([int]$version -notin @(17,18,19,20)) { Stop-Safely 'The isolated test database must be at Flyway V17, V18, V19, or V20 before synthetic cleanup is considered.' }
 
         # The integration fixtures are rooted only by their exact synthetic exam
         # markers. Deno uses phase4- plus eight hex digits; Spring uses the fixed
@@ -339,9 +342,10 @@ END $$;
             $mavenTestSelector = 'RegisteredUserRemovalPostgresIT'
             $reportNames = @('TEST-com.airlineprep.bot.admin.RegisteredUserRemovalPostgresIT.xml')
         } else {
-            $mavenTestSelector = 'Phase4PostgresIT,RegisteredUserRemovalPostgresIT'
+            $mavenTestSelector = 'Phase4PostgresIT,PaymentPostgresIT,RegisteredUserRemovalPostgresIT'
             $reportNames = @(
                 'TEST-com.airlineprep.bot.payment.Phase4PostgresIT.xml',
+                'TEST-com.airlineprep.bot.payment.PaymentPostgresIT.xml',
                 'TEST-com.airlineprep.bot.admin.RegisteredUserRemovalPostgresIT.xml'
             )
         }
@@ -476,7 +480,7 @@ END $$;
     # admin credential only for these read-only final database checks.
     [Environment]::SetEnvironmentVariable('PGPASSWORD', $pgPassword, 'Process')
     $latest = Invoke-LocalPsql $dbName "SELECT COALESCE(MAX(version::int),0) FROM flyway_schema_history WHERE success;" -Quiet
-    if ($latest -ne '19') { Stop-Safely 'Flyway did not finish at V19.' }
+    if ($latest -ne '20') { Stop-Safely 'Flyway did not finish at V20.' }
     $left = Invoke-LocalPsql $dbName "SELECT (SELECT COUNT(*) FROM exam_types)+(SELECT COUNT(*) FROM categories)+(SELECT COUNT(*) FROM bot_users)+(SELECT COUNT(*) FROM questions)+(SELECT COUNT(*) FROM payment_requests)+(SELECT COUNT(*) FROM mock_attempts)+(SELECT COUNT(*) FROM payment_methods)+(SELECT COUNT(*) FROM access_entitlements)+(SELECT COUNT(*) FROM practice_deliveries)+(SELECT COUNT(*) FROM practice_usage)+(SELECT COUNT(*) FROM practice_sessions)+(SELECT COUNT(*) FROM practice_update_receipts);" -Quiet
     if ([int]$left -ne 0) { Stop-Safely 'Synthetic fixture cleanup check found remaining test rows; database is preserved for inspection.' }
     $testsPassed = $true
@@ -498,15 +502,15 @@ END $$;
 if (-not $testsPassed) {
 Write-Output 'PHASE 5 LOCAL POSTGRES INTEGRATION: BLOCKED / FAIL'
     Write-Output '- target: local 127.0.0.1 only'
-    Write-Output '- database: airline_exam_bot_phase5_test (preserved; no DROP, TRUNCATE, or Flyway clean)'
+    Write-Output "- database: $dbName (preserved; no DROP, TRUNCATE, or Flyway clean)"
     Write-Output "- stage: $failureStage"
     Write-Output "- line: $failureLine"
     [Console]::Error.WriteLine($failure)
     exit 1
 }
 Write-Output 'PHASE 5 LOCAL POSTGRES INTEGRATION: PASS'
-Write-Output 'POSTGRES: PostgreSQL 18 local loopback; dedicated airline_exam_bot_phase5_test; synthetic fixtures cleaned.'
-Write-Output 'FLYWAY: V1–V19 applied by Spring Boot; SQL and Java migrations included; final version 19.'
+Write-Output "POSTGRES: PostgreSQL 18 local loopback; dedicated $dbName; synthetic fixtures cleaned."
+Write-Output 'FLYWAY: V1–V20 applied by Spring Boot; SQL and Java migrations included; final version 20.'
 Write-Output 'PHASE 4 MOCK TESTS: creation, first answer charge, duplicate callback, resume, timer, frozen versions, scoring, zero-answer expiry PASS.'
 Write-Output 'PHASE 4 PAYMENT TESTS: request creation, duplicate reference, duplicate update, approval idempotency, rejection, entitlement visibility PASS.'
 Write-Output 'No staging or production database was contacted.'

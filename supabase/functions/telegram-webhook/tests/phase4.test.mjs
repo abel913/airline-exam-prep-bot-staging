@@ -56,10 +56,10 @@ function fixture({duration=2,questions=2,limit=2}={}){
     try{return await fn(unit);}finally{release();}}};
   return {state,student,service:new MockService(store)};
 }
-function paymentFixture({paymentEnabled=true,manualEnabled=true}={}){
- const state={requests:new Map(),next:1,refs:new Set(),notifications:[],methods:[{id:"1",type:"BANK_TRANSFER",
+function paymentFixture({paymentEnabled=true,manualEnabled=true,methods=null,methodsError=null}={}){
+ const state={requests:new Map(),next:1,refs:new Set(),notifications:[],audit:[],methodsError,methods:methods??[{id:"1",type:"BANK_TRANSFER",
   display_name:"Staging Test Transfer",account_name:"TEST ONLY",destination:"NO REAL DESTINATION",
-  instructions:"Synthetic staging instructions",active:true}],students:new Map([
+  instructions:"Synthetic staging instructions",active:true,display_order:0}],students:new Map([
    ["tg",{id:"10",telegramId:"10",examId:"1",language:"en",accessLevel:"FREE",practiceLimit:10,practiceUsed:0,mockLimit:2,mocksUsed:0,questionsPerMock:5}],
   ["tg2",{id:"11",telegramId:"11",examId:"1",language:"en",accessLevel:"FREE",practiceLimit:10,practiceUsed:0,mockLimit:2,mocksUsed:0,questionsPerMock:5,entitlements:{"1":"FREE","2":"FREE"}}],
   ])};state.students.get("tg").entitlements={"1":"FREE","2":"FREE"};state.exams=new Set(["1","2"]);
@@ -74,17 +74,22 @@ function paymentFixture({paymentEnabled=true,manualEnabled=true}={}){
   async creation(user,exam,key){return [...state.requests.values()].find(r=>r.user_id===user&&r.target_exam_type_id===exam&&r.creation_key===key)??null;},
   async history(user){return [...state.requests.values()].filter(r=>r.user_id===user);},
   async exams(tg){const s=state.students.get(tg);if(!s)throw new PaymentError("student.register");return{language:s.language,exams:Object.entries(s.entitlements).filter(([id])=>state.exams.has(id)).map(([id,tier])=>({id,name:id==="1"?"Synthetic A":"Synthetic B",nameAm:"",current:id===s.examId,tier}))};},
-  async methods(){return state.methods.filter(m=>m.active);},
+  async methods(page=0){if(state.methodsError)throw state.methodsError;return state.methods.filter(m=>m.active)
+   .sort((a,b)=>a.display_order-b.display_order||Number(a.id)-Number(b.id)).slice(page*20,page*20+20);},
   async method(id){return state.methods.find(m=>m.id===String(id))??null;},
   async create(s,key,c){const id=String(state.next++),r={id,user_id:s.id,target_exam_type_id:s.examId,open_user_id:s.id,creation_key:key,status:"SELECT_METHOD",
    amount:c.lifetime_price,currency:c.currency,method_id:null,method_type:null,method_name:null,account_name:null,destination:null,
-   instructions:null,reference:null,normalized_reference:null,receipt_file_id:null,receipt_unique_id:null,receipt_type:null,
+   instructions:null,reference:null,normalized_reference:null,payment_proof_text:null,receipt_file_id:null,receipt_unique_id:null,receipt_type:null,
    receipt_filename:null,receipt_mime:null,receipt_size:null,created_at:new Date(1000).toISOString(),submitted_at:null,rejection_reason:null};
    state.requests.set(id,r);return id;},
   async snapshotMethod(id,method,m){Object.assign(state.requests.get(String(id)),{status:"AWAITING_REFERENCE",method_id:method,
    method_type:m.type,method_name:m.display_name,account_name:m.account_name,destination:m.destination,instructions:m.instructions});},
   async referenceExists(norm,except){return [...state.requests.values()].some(r=>r.id!==except&&r.normalized_reference===norm);},
   async saveReference(id,raw,norm){Object.assign(state.requests.get(String(id)),{reference:raw,normalized_reference:norm,status:"AWAITING_RECEIPT"});state.refs.add(norm);},
+  async saveProof(id,proof,reference,norm){const r=state.requests.get(String(id));Object.assign(r,{payment_proof_text:proof,
+   reference:reference??r.reference,normalized_reference:norm??r.normalized_reference,status:"PENDING_REVIEW",submitted_at:new Date().toISOString()});
+   if(norm)state.refs.add(norm);},
+  async recordProofSubmitted(user,id){state.audit.push({user,id,action:"PAYMENT_PROOF_SUBMITTED"},{user,id,action:"PAYMENT_SUBMITTED_FOR_REVIEW"});},
   async saveReceipt(id,r){Object.assign(state.requests.get(String(id)),{...{receipt_file_id:r.fileId,receipt_unique_id:r.uniqueId,
    receipt_type:r.type,receipt_filename:r.filename,receipt_mime:r.mime,receipt_size:r.size,status:"PENDING_REVIEW",
    submitted_at:new Date().toISOString()}});},
@@ -168,6 +173,89 @@ test("payment settings gate new requests and price is read from staging settings
  const on=paymentFixture();const request=await on.service.start("tg","1","payment-key");
  assert.equal(request.request.amount,"123.45");assert.equal(request.request.currency,"ETB");
 });
+async function paymentStartMessage(fixture){
+ const sent=[],flow=createPaymentFlow(fixture.service,{async sendMessage(...args){sent.push(args);}});
+ await flow.callback("10","tg","pay:open","methods-open");
+ await flow.callback("10","tg","pay:exam:1","methods-start");
+ return sent.at(-1);
+}
+test("payment start reports zero active methods only after a successful empty query",async()=>{
+ const f=paymentFixture({methods:[]}),[,text,markup]=await paymentStartMessage(f);
+ assert.match(text,/No active payment methods are available/);
+ assert.deepEqual(markup.inline_keyboard.flat().filter(b=>b.callback_data.startsWith("pay:method:")),[]);
+});
+const PROOF_GUIDANCE="After payment, send either the full transaction confirmation message you received from the bank/payment provider, including the official receipt link, OR send only the transaction/reference number.";
+async function selectedPaymentFlow(fixture,target="2"){
+ const sent=[],flow=createPaymentFlow(fixture.service,{async sendMessage(...args){sent.push(args);}});
+ await flow.callback("10","tg","pay:open","proof-open");
+ await flow.callback("10","tg","pay:exam:"+target,"proof-start");
+ const req=[...fixture.state.requests.values()][0];
+ await flow.callback("10","tg",`pay:method:${req.id}:1`,"proof-method");
+ return {flow,sent,req};
+}
+test("exact English proof prompt follows payment instructions and an Amharic translation exists",async()=>{
+ const f=paymentFixture(),{sent}=await selectedPaymentFlow(f);
+ assert.ok(sent.at(-1)[1].includes(PROOF_GUIDANCE));
+ assert.ok(sent.at(-1)[1].indexOf("Synthetic staging instructions")<sent.at(-1)[1].indexOf(PROOF_GUIDANCE));
+ assert.equal(message("en","payment.proofPrompt"),PROOF_GUIDANCE);
+ assert.notEqual(message("am","payment.proofPrompt"),"payment.proofPrompt");
+});
+test("full multiline transaction proof preserves newlines and receipt URL and becomes pending immediately",async()=>{
+ const f=paymentFixture(),{flow,sent,req}=await selectedPaymentFlow(f);
+ const proof="Dear Customer,\nA debit transaction of ETB 50.00 was made.\nReference: BANK-ABC/123\nhttps://provider.example/receipt?id=synthetic";
+ await flow.message("10","tg",{text:proof},"synthetic-update-1");
+ assert.equal(req.status,"PENDING_REVIEW");assert.equal(req.payment_proof_text,proof);
+ assert.equal(req.reference,null);assert.equal(req.receipt_file_id,null);assert.equal(req.receipt_unique_id,null);
+ assert.equal(sent.at(-1)[1].includes(PROOF_GUIDANCE),false);
+ assert.equal(f.state.notifications.length,1);assert.equal(f.state.audit.filter(e=>e.action==="PAYMENT_SUBMITTED_FOR_REVIEW").length,1);
+ assert.equal(JSON.stringify(f.state.audit).includes("provider.example"),false);
+ await flow.message("10","tg",{text:proof},"synthetic-update-1");
+ assert.equal(f.state.notifications.length,1);assert.equal(f.state.audit.filter(e=>e.action==="PAYMENT_SUBMITTED_FOR_REVIEW").length,1);
+ assert.equal(req.target_exam_type_id,"2");assert.equal(f.state.students.get("tg").examId,"1");
+});
+test("reference-only proof populates legacy reference fields and becomes pending",async()=>{
+ const f=paymentFixture(),{flow,req}=await selectedPaymentFlow(f,"1");
+ await flow.message("10","tg",{text:"  TEST-REF-001  "},"synthetic-reference-update");
+ assert.equal(req.payment_proof_text,"TEST-REF-001");assert.equal(req.reference,"TEST-REF-001");
+ assert.equal(req.normalized_reference,"TEST-REF-001");assert.equal(req.status,"PENDING_REVIEW");
+ assert.equal(req.receipt_file_id,null);
+});
+test("blank text is rejected and photo or document is not accepted while awaiting new proof",async()=>{
+ for(const body of [{text:" \n \t"},{photo:[{file_id:"synthetic"}]},{document:{file_id:"synthetic"}}]){
+  const f=paymentFixture(),{flow,sent,req}=await selectedPaymentFlow(f);
+  await flow.message("10","tg",body,"synthetic-invalid-proof");
+  assert.equal(req.status,"AWAITING_REFERENCE");assert.equal(req.payment_proof_text,null);
+  assert.equal(req.receipt_file_id,null);assert.equal(f.state.notifications.length,0);assert.equal(f.state.audit.length,0);
+  assert.equal(sent.at(-1)[1],PROOF_GUIDANCE);
+ }
+});
+test("payment start displays an active TELEBIRR method",async()=>{
+ const f=paymentFixture({methods:[{id:"7",type:"TELEBIRR",display_name:"Telebirr",active:true,display_order:0}]});
+ const [,text,markup]=await paymentStartMessage(f),buttons=markup.inline_keyboard.flat().filter(b=>b.callback_data.startsWith("pay:method:"));
+ assert.doesNotMatch(text,/No active payment methods/);assert.deepEqual(buttons.map(b=>b.text),["Telebirr"]);
+});
+test("payment start displays an active BANK_TRANSFER method",async()=>{
+ const f=paymentFixture({methods:[{id:"8",type:"BANK_TRANSFER",display_name:"CBE",active:true,display_order:0}]});
+ const [,text,markup]=await paymentStartMessage(f),buttons=markup.inline_keyboard.flat().filter(b=>b.callback_data.startsWith("pay:method:"));
+ assert.doesNotMatch(text,/No active payment methods/);assert.deepEqual(buttons.map(b=>b.text),["CBE"]);
+});
+test("payment start lists two active method types in configured order and excludes inactive methods",async()=>{
+ const f=paymentFixture({methods:[
+  {id:"1",type:"BANK_TRANSFER",display_name:"CBE",active:true,display_order:1},
+  {id:"2",type:"TELEBIRR",display_name:"Telebirr",active:true,display_order:0},
+  {id:"3",type:"BANK_TRANSFER",display_name:"Inactive Bank",active:false,display_order:2},
+ ]});
+ const [,text,markup]=await paymentStartMessage(f),buttons=markup.inline_keyboard.flat().filter(b=>b.callback_data.startsWith("pay:method:"));
+ assert.doesNotMatch(text,/No active payment methods/);assert.deepEqual(buttons.map(b=>b.text),["Telebirr","CBE"]);
+ assert.ok(buttons.every(b=>b.callback_data.startsWith("pay:method:")));
+});
+test("payment-method query failures propagate and are not rendered as zero methods",async()=>{
+ const failure=new Error("SYNTHETIC_PAYMENT_METHOD_QUERY_FAILURE"),f=paymentFixture({methodsError:failure});
+ const sent=[],flow=createPaymentFlow(f.service,{async sendMessage(...args){sent.push(args);}});
+ await flow.callback("10","tg","pay:open","query-error-open");
+ await assert.rejects(flow.callback("10","tg","pay:exam:1","query-error-start"),failure);
+ assert.equal(sent.some(([,text])=>/No active payment methods are available/.test(text)),false);
+});
 test("explicit purchase targets preserve current exam and scope retry keys by exam",async()=>{
  const f=paymentFixture();const a=await f.service.start("tg","1","same-key");
  assert.equal((await f.service.start("tg","1","same-key")).request.id,a.request.id);
@@ -196,6 +284,10 @@ test("upgrade Telegram flow displays tiers and starts only the explicitly select
  await flow.callback("10","tg","pay:exam:2","edge-target");
  const req=[...f.state.requests.values()][0];
  assert.equal(req.target_exam_type_id,"2");
+ assert.equal(f.state.students.get("tg").examId,"1");
+ const methodButton=sent.at(-1)[2].inline_keyboard.flat().find(b=>b.callback_data.startsWith("pay:method:"));
+ assert.ok(methodButton);await flow.callback("10","tg",methodButton.callback_data,"edge-select-target-method");
+ assert.equal(req.target_exam_type_id,"2");assert.equal(req.status,"AWAITING_REFERENCE");
  assert.equal(f.state.students.get("tg").examId,"1");
 });
 test("payment method, reference, receipt and duplicate update handling preserve request identity",async()=>{

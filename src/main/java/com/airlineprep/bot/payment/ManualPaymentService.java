@@ -62,6 +62,28 @@ public class ManualPaymentService implements PaymentService {
   store.jdbc().update("UPDATE payment_requests SET reference=?,normalized_reference=?,status='AWAITING_RECEIPT' WHERE id=?",input.strip(),normalized,request);
   log(s,request,"PAYMENT_REFERENCE_SUBMITTED");return view(s,queries.get(request),0);
  }
+ public View submitProof(long sender,long request,String input) {
+  var current=access.lock(sender);var p=queries.own(request,current.id());var s=access.lock(sender,p.examTypeId());
+  String proof=normalizeProof(input);
+  if(p.status()==PaymentStatus.PENDING_REVIEW&&proof.equals(p.paymentProofText())) return view(s,p,0);
+  if(p.status()!=PaymentStatus.AWAITING_REFERENCE&&p.status()!=PaymentStatus.AWAITING_RECEIPT)
+   throw new ExamException("payment.state");
+  String reference=null,normalized=null;
+  try {normalized=normalizeReference(proof);reference=proof;}
+  catch(ExamException ignored) { /* Full provider messages are stored as proof without parsing. */ }
+  if(normalized!=null&&store.jdbc().queryForObject("SELECT COUNT(*) FROM payment_requests WHERE normalized_reference=? AND id<>?",Long.class,normalized,request)>0)
+   throw new ExamException("payment.duplicateReference");
+  store.jdbc().update("UPDATE payment_requests SET payment_proof_text=?,reference=COALESCE(?,reference),normalized_reference=COALESCE(?,normalized_reference),status='PENDING_REVIEW',submitted_at=? WHERE id=?",
+   proof,reference,normalized,java.sql.Timestamp.from(clock.instant()),request);
+  log(s,request,"PAYMENT_PROOF_SUBMITTED");log(s,request,"PAYMENT_SUBMITTED_FOR_REVIEW");
+  outbox.enqueue(request,"ADMIN_PENDING",s);return view(s,queries.get(request),0);
+ }
+ public static String normalizeProof(String input) {
+  if(input==null) throw new ExamException("payment.proofInvalid");
+  String proof=input.strip();
+  if(proof.isEmpty()||proof.length()>4096||proof.indexOf('\0')>=0) throw new ExamException("payment.proofInvalid");
+  return proof;
+ }
  public View receipt(long sender,long request,ReceiptMetadata receipt) {
   var current=access.lock(sender);var p=queries.own(request,current.id());var s=access.lock(sender,p.examTypeId());
   if(receipt==null) throw new ExamException("payment.receiptInvalid");

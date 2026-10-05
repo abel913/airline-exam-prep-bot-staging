@@ -30,12 +30,12 @@ class PaymentTelegramTests extends PaymentFixture {
   handler.handle(mapper.valueToTree(Map.of("callback_query",Map.of("id","cb","data",callback,"from",Map.of("id",sender),
    "message",Map.of("chat",Map.of("id",sender,"type","private"))))),"TestBot");
  }
- void message(Map<String,Object> fields) throws Exception {
-  var m=new HashMap<>(fields);m.put("from",Map.of("id",sender));m.put("chat",Map.of("id",sender,"type","private"));
+ void message(Map<String,?> fields) throws Exception {
+  var m=new HashMap<String,Object>();m.putAll(fields);m.put("from",Map.of("id",sender));m.put("chat",Map.of("id",sender,"type","private"));
   texts.clear();buttons.clear();handler.handle(mapper.valueToTree(Map.of("message",m)),"TestBot");
  }
  String button(String prefix) {return buttons.stream().filter(x->x.startsWith(prefix)).findFirst().orElseThrow();}
- @Test void fullUpdateFlowResumeReferencePhotoPendingAndLifetimeMenu() throws Exception {
+ @Test void fullUpdateFlowResumeTextProofPendingAndLifetimeMenu() throws Exception {
   message(Map.of("text","/start"));assertThat(buttons).contains("pay:open","pay:status");
   click("pay:open");assertThat(String.join("",texts)).contains("Which exam");
   click(button("pay:exam:"));assertThat(String.join("",texts)).contains("50.00","Test support");
@@ -43,12 +43,33 @@ class PaymentTelegramTests extends PaymentFixture {
   long id=payments.status(sender).request().id();
   message(Map.of("text","/help"));assertThat(queries.get(id).status()).isEqualTo(PaymentStatus.AWAITING_REFERENCE);
   message(Map.of("text","/start"));assertThat(buttons).contains("p:menu");click("pay:status");
-  message(Map.of("text","DEVTEST-TG"));assertThat(queries.get(id).status()).isEqualTo(PaymentStatus.AWAITING_RECEIPT);
+  String guidance=messages.getMessage("payment.proofPrompt",null,Locale.ENGLISH);
+  assertThat(String.join("",texts)).contains(guidance);
+  message(Map.of("text","DEVTEST-TG"));assertThat(queries.get(id).status()).isEqualTo(PaymentStatus.PENDING_REVIEW);
+  assertThat(queries.get(id).paymentProofText()).isEqualTo("DEVTEST-TG");assertThat(queries.get(id).receipt()).isNull();
+  assertThat(String.join("",texts)).contains("Pending manual review");
   message(Map.of("photo",List.of(Map.of("file_id","photo","file_unique_id","unique","width",100,"height",100,"file_size",100))));
-  assertThat(queries.get(id).status()).isEqualTo(PaymentStatus.PENDING_REVIEW);assertThat(String.join("",texts)).contains("Pending manual review");
+  assertThat(queries.get(id).status()).isEqualTo(PaymentStatus.PENDING_REVIEW);
   review.approve(id,"test-admin");message(Map.of("text","/start"));assertThat(String.join("",texts)).contains("Unlimited");
   click("pay:open");assertThat(String.join("",texts)).contains("Which exam");
   click(button("pay:exam:"));assertThat(String.join("",texts)).contains("Lifetime access is active");
+ }
+ @Test void photoDocumentAndBlankTextWhileWaitingReturnTextGuidanceWithoutAdvancing() throws Exception {
+  long id=selected();String guidance=messages.getMessage("payment.proofPrompt",null,Locale.ENGLISH);
+  for(Map<String,?> fields:List.<Map<String,?>>of(Map.of("photo",List.of(Map.of("file_id","photo","file_unique_id","unique","file_size",100))),
+    Map.of("document",Map.of("file_id","doc","file_unique_id","doc-unique","file_name","proof.pdf","mime_type","application/pdf","file_size",100)),
+    Map.of("text"," \n \t "))){
+   message(fields);assertThat(queries.get(id).status()).isEqualTo(PaymentStatus.AWAITING_REFERENCE);
+   assertThat(queries.get(id).paymentProofText()).isNull();assertThat(queries.get(id).receipt()).isNull();
+   assertThat(String.join("",texts)).contains(guidance);
+  }
+ }
+ @Test void fullTransactionTextKeepsLinesAndUrlAndPromptIsExact() throws Exception {
+  long id=selected();String prompt=messages.getMessage("payment.proofPrompt",null,Locale.ENGLISH);
+  assertThat(prompt).isEqualTo("After payment, send either the full transaction confirmation message you received from the bank/payment provider, including the official receipt link, OR send only the transaction/reference number.");
+  String proof="Dear Customer,\nA debit transaction occurred.\nhttps://provider.example/receipt?id=synthetic";
+  message(Map.of("text",proof));assertThat(queries.get(id).status()).isEqualTo(PaymentStatus.PENDING_REVIEW);
+  assertThat(queries.get(id).paymentProofText()).isEqualTo(proof);assertThat(queries.get(id).receipt()).isNull();
  }
  @Test void forwardedAndUnsupportedAttachmentsDoNotSubmit() throws Exception {
   long id=selected();payments.reference(sender,id,"DEVTEST-FORWARDED");

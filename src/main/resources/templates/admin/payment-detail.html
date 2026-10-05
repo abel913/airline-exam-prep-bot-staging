@@ -7,6 +7,7 @@
 <dt>Method</dt><dd th:text="${payment.methodName}"></dd><dt>Account holder</dt><dd th:text="${payment.accountName}"></dd>
 <dt>Destination shown</dt><dd th:text="${payment.destination}"></dd><dt>Instructions shown</dt><dd th:text="${payment.instructions}"></dd>
 <dt>Transaction reference</dt><dd th:text="${payment.reference}"></dd><dt>Submitted</dt><dd th:text="${payment.submitted}"></dd>
+<dt th:if="${payment.paymentProofText != null}">Payment proof</dt><dd th:if="${payment.paymentProofText != null}" class="payment-proof" th:text="${payment.paymentProofText}"></dd>
 <dt>Reviewed</dt><dd th:text="${payment.reviewed}"></dd><dt>Reviewer</dt><dd th:text="${payment.reviewer}"></dd>
 <dt>User-visible rejection reason</dt><dd th:text="${payment.rejectionReason}"></dd></dl>
 <a th:if="${payment.receipt != null}" th:href="@{/admin/payments/{id}/receipt(id=${payment.id})}">Download receipt securely</a>

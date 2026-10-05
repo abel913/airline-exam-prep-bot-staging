@@ -34,14 +34,18 @@ public class PaymentFlow {
   try {
    var v=payments.status(sender);lang=v.student().language();var p=v.request();
    if(p==null) return;
-   if(message.has("forward_origin")||message.has("forward_date")||message.has("forward_from")||message.has("forward_from_chat")||message.path("is_automatic_forward").asBoolean())
-    throw new ExamException("payment.receiptInvalid");
    String text=message.path("text").asText("");
    if(text.startsWith("/")) return;
    if(p.status()==PaymentStatus.AWAITING_REFERENCE&&message.path("text").isTextual()) {
-    show(sender,payments.reference(sender,p.id(),text));return;
+    show(sender,payments.submitProof(sender,p.id(),text));return;
+   }
+   if(p.status()==PaymentStatus.AWAITING_REFERENCE) {
+    ui.error(sender,lang,"payment.proofPrompt");return;
    }
    if(p.status()==PaymentStatus.AWAITING_RECEIPT) {
+    if(message.path("text").isTextual()) {show(sender,payments.submitProof(sender,p.id(),text));return;}
+    if(message.has("forward_origin")||message.has("forward_date")||message.has("forward_from")||message.has("forward_from_chat")||message.path("is_automatic_forward").asBoolean())
+     throw new ExamException("payment.receiptInvalid");
     ReceiptMetadata receipt=parseReceipt(message);
     show(sender,payments.receipt(sender,p.id(),receipt));
    }
@@ -67,6 +71,8 @@ public class PaymentFlow {
   } else {
    text=ui.message(lang,"payment.summary",p.amount().toPlainString(),p.currency(),ui.message(lang,"payment.status."+p.status()));
    if(p.methodId()!=null) text+="\n"+p.methodName()+"\n"+p.accountName()+"\n"+p.destination()+"\n"+p.instructions();
+   if(p.status()==PaymentStatus.AWAITING_REFERENCE||p.status()==PaymentStatus.AWAITING_RECEIPT)
+    text+="\n"+ui.message(lang,"payment.proofPrompt");
    if(p.status()==PaymentStatus.SELECT_METHOD) {
     if(!v.enabled()) text+="\n"+ui.message(lang,"payment.disabled");
     else {

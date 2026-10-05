@@ -52,7 +52,7 @@ public class PaymentQueries {
    r.getString("receipt_type"),r.getString("receipt_filename"),r.getString("receipt_mime"),r.getLong("receipt_size"));
   return new PaymentRequest(r.getLong("id"),r.getLong("user_id"),r.getLong("target_exam_type_id"),PaymentStatus.valueOf(r.getString("status")),r.getBigDecimal("amount"),r.getString("currency"),
    r.getObject("method_id",Long.class),r.getString("method_type"),r.getString("method_name"),r.getString("account_name"),r.getString("destination"),
-   r.getString("instructions"),r.getString("reference"),r.getString("normalized_reference"),receipt,ExamStore.instant(r,"created_at"),
+   r.getString("instructions"),r.getString("reference"),r.getString("normalized_reference"),r.getString("payment_proof_text"),receipt,ExamStore.instant(r,"created_at"),
    ExamStore.instant(r,"submitted_at"),ExamStore.instant(r,"reviewed_at"),r.getString("reviewed_by"),r.getString("rejection_reason"));
  }
 }

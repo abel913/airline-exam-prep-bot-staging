@@ -43,7 +43,8 @@ import java.time.Instant;
     "registration.phone-hmac-key=dGVzdC1vbmx5LWtleS0zMi1ieXRlcy1ub3QtYS1zZWNyZXQ="})
 @Transactional
 class Phase4PostgresIT {
-    private static final String DB_NAME = "airline_exam_bot_phase5_test";
+    private static final java.util.Set<String> TEST_DATABASES = java.util.Set.of(
+        "airline_exam_bot_phase5_test", "airline_exam_bot_phase5_v20_fresh_test", "airline_exam_bot_phase5_v20_final_test", "airline_exam_bot_phase5_v20_verify_test");
 
     @DynamicPropertySource
     static void isolatedPostgres(DynamicPropertyRegistry registry) {
@@ -52,11 +53,11 @@ class Phase4PostgresIT {
         String username = System.getenv("PHASE4_PG_TEST_USER");
         String password = System.getenv("PHASE4_PG_TEST_PASSWORD");
         String port = System.getenv("PHASE4_PG_PORT");
-        if (!"127.0.0.1".equals(host) || !DB_NAME.equals(name) || username == null || password == null
+        if (!"127.0.0.1".equals(host) || !TEST_DATABASES.contains(name) || username == null || password == null
                 || port == null || !port.matches("[0-9]{1,5}")) {
             throw new IllegalStateException("Phase 5 PostgreSQL tests require the dedicated local test database only.");
         }
-        String url = "jdbc:postgresql://127.0.0.1:" + port + "/" + DB_NAME;
+        String url = "jdbc:postgresql://127.0.0.1:" + port + "/" + name;
         registry.add("spring.datasource.url", () -> url);
         registry.add("spring.datasource.username", () -> username);
         registry.add("spring.datasource.password", () -> password);
@@ -82,7 +83,7 @@ class Phase4PostgresIT {
     @Test
     void phase4MockPaymentAndBothJavaFlywayMigrationsOnPostgreSQL() throws Exception {
         assertThat(jdbc.queryForObject("SELECT version()", String.class)).contains("PostgreSQL 18");
-        assertThat(jdbc.queryForObject("SELECT version FROM flyway_schema_history WHERE success ORDER BY installed_rank DESC LIMIT 1", String.class)).isEqualTo("19");
+        assertThat(jdbc.queryForObject("SELECT version FROM flyway_schema_history WHERE success ORDER BY installed_rank DESC LIMIT 1", String.class)).isEqualTo("20");
         assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM flyway_schema_history WHERE version IN ('16','17','18','19') AND success", Integer.class)).isEqualTo(4);
 
         var before = SettingsForm.from(settings.current());
@@ -197,7 +198,7 @@ class Phase4PostgresIT {
 
     @Test
     void phase5MultiExamUsagePaymentsContactsAndUniquenessOnPostgreSQL() throws Exception {
-        assertThat(jdbc.queryForObject("SELECT version FROM flyway_schema_history WHERE success ORDER BY installed_rank DESC LIMIT 1", String.class)).isEqualTo("19");
+        assertThat(jdbc.queryForObject("SELECT version FROM flyway_schema_history WHERE success ORDER BY installed_rank DESC LIMIT 1", String.class)).isEqualTo("20");
         var before=SettingsForm.from(settings.current());
         settings.update(new SettingsForm(10,2,3,new BigDecimal("50.00"),"ETB",true,true,"Synthetic staging support",1),"phase5-local-test");
         String suffix=UUID.randomUUID().toString().replace("-","").substring(0,12);
@@ -284,7 +285,7 @@ class Phase4PostgresIT {
     void phase5V17ToV18BackfillPreservesLegacyStateOnPostgreSQL() throws Exception {
         String host=System.getenv("PHASE4_PG_HOST"),database=System.getenv("PHASE4_PG_DATABASE");
         String username=System.getenv("PHASE4_PG_TEST_USER"),password=System.getenv("PHASE4_PG_TEST_PASSWORD");
-        if(!"127.0.0.1".equals(host)||!"airline_exam_bot_phase5_test".equals(database)||username==null||password==null)
+        if(!"127.0.0.1".equals(host)||!TEST_DATABASES.contains(database)||username==null||password==null)
             throw new IllegalStateException("V17-to-V18 migration integration requires the dedicated local Phase 5 PostgreSQL database.");
         String url="jdbc:postgresql://127.0.0.1:5432/"+database;
         String schema="phase5_v17_"+UUID.randomUUID().toString().replace("-","").substring(0,12);
@@ -323,7 +324,7 @@ class Phase4PostgresIT {
                 }
             }
             Flyway latest=Flyway.configure().dataSource(url,username,password).schemas(schema).defaultSchema(schema).load();
-            assertThat(latest.migrate().targetSchemaVersion).isEqualTo("19");
+            assertThat(latest.migrate().targetSchemaVersion).isEqualTo("20");
             latest.validate();
             try(var c=DriverManager.getConnection(url,username,password)) {
                 c.setSchema(schema);

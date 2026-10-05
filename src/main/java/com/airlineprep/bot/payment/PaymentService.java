@@ -9,6 +9,7 @@ public interface PaymentService {
  View methods(long sender,long request,int page);
  View select(long sender,long request,long method);
  View reference(long sender,long request,String reference);
+ View submitProof(long sender,long request,String proofText);
  View receipt(long sender,long request,ReceiptMetadata receipt);
  View cancel(long sender,long request);
 }

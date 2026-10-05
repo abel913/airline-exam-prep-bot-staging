@@ -32,16 +32,17 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
     "payment.notifications.automatic=false"})
 @Transactional
 class RegisteredUserRemovalPostgresIT {
-    private static final String DB_NAME = "airline_exam_bot_phase5_test";
+    private static final java.util.Set<String> TEST_DATABASES = java.util.Set.of(
+        "airline_exam_bot_phase5_test", "airline_exam_bot_phase5_v20_fresh_test", "airline_exam_bot_phase5_v20_final_test", "airline_exam_bot_phase5_v20_verify_test");
 
     @DynamicPropertySource
     static void isolatedPostgres(DynamicPropertyRegistry registry) {
         String host=System.getenv("PHASE4_PG_HOST"),name=System.getenv("PHASE4_PG_DATABASE");
         String username=System.getenv("PHASE4_PG_TEST_USER"),password=System.getenv("PHASE4_PG_TEST_PASSWORD");
         String port=System.getenv("PHASE4_PG_PORT");
-        if (!"127.0.0.1".equals(host) || !DB_NAME.equals(name) || username==null || password==null || !"5432".equals(port))
+        if (!"127.0.0.1".equals(host) || !TEST_DATABASES.contains(name) || username==null || password==null || !"5432".equals(port))
             throw new IllegalStateException("Registered-user PostgreSQL tests require the dedicated loopback Phase 5 database only.");
-        String url="jdbc:postgresql://127.0.0.1:5432/"+DB_NAME;
+        String url="jdbc:postgresql://127.0.0.1:5432/"+name;
         registry.add("spring.datasource.url",()->url); registry.add("spring.datasource.username",()->username);
         registry.add("spring.datasource.password",()->password); registry.add("spring.datasource.driver-class-name",()->"org.postgresql.Driver");
         registry.add("spring.flyway.url",()->url); registry.add("spring.flyway.user",()->username); registry.add("spring.flyway.password",()->password);
@@ -62,8 +63,8 @@ class RegisteredUserRemovalPostgresIT {
 
     @Test
     void removesOnlySelectedUsersCompleteHistoryAndAllowsSameIdentityToRegisterAgain() throws Exception {
-        assertThat(jdbc.queryForObject("SELECT current_database()",String.class)).isEqualTo(DB_NAME);
-        assertThat(jdbc.queryForObject("SELECT version FROM flyway_schema_history WHERE success ORDER BY installed_rank DESC LIMIT 1",String.class)).isEqualTo("19");
+        assertThat(jdbc.queryForObject("SELECT current_database()",String.class)).isIn(TEST_DATABASES);
+        assertThat(jdbc.queryForObject("SELECT version FROM flyway_schema_history WHERE success ORDER BY installed_rank DESC LIMIT 1",String.class)).isEqualTo("20");
         String suffix=UUID.randomUUID().toString().replace("-","").substring(0,12);
         settings.update(new SettingsForm(10,2,1,new BigDecimal("1.00"),"ETB",true,true,"synthetic integration",1),"phase5-remove-test");
         long examA=catalog.save(false,null,new CatalogForm("rm-a-"+suffix,"Synthetic Removal Exam A","",true,0,null),"phase5-remove-test");

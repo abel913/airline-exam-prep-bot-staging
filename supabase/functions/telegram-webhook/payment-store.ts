@@ -6,12 +6,12 @@ async function run(db:QueryClient,sql:string,...v:unknown[]):Promise<void>{await
 const sid=(v:string|bigint|number)=>String(v);
 type Req={id:string|bigint;user_id:string|bigint;target_exam_type_id:string|bigint;status:string;amount:string|number;currency:string;method_id:string|bigint|null;
  method_type:string|null;method_name:string|null;account_name:string|null;destination:string|null;instructions:string|null;
- reference:string|null;normalized_reference:string|null;receipt_file_id:string|null;receipt_unique_id:string|null;
+ reference:string|null;normalized_reference:string|null;payment_proof_text:string|null;receipt_file_id:string|null;receipt_unique_id:string|null;
  receipt_type:string|null;receipt_filename:string|null;receipt_mime:string|null;receipt_size:number|null;created_at:Date|string;
  submitted_at:Date|string|null;reviewed_at:Date|string|null;reviewed_by:string|null;rejection_reason:string|null;creation_key:string};
 export function requestView(r:Req|null){return r?{id:sid(r.id),userId:sid(r.user_id),examId:sid(r.target_exam_type_id),status:r.status,amount:String(r.amount),currency:r.currency,
  methodId:r.method_id===null?null:sid(r.method_id),methodType:r.method_type,methodName:r.method_name,accountName:r.account_name,
- destination:r.destination,instructions:r.instructions,reference:r.reference,receipt:r.receipt_file_id===null?null:{
+ destination:r.destination,instructions:r.instructions,reference:r.reference,paymentProofText:r.payment_proof_text,receipt:r.receipt_file_id===null?null:{
  fileId:r.receipt_file_id,uniqueId:r.receipt_unique_id,type:r.receipt_type,filename:r.receipt_filename,mime:r.receipt_mime,size:r.receipt_size},
  created:r.created_at,submitted:r.submitted_at,rejectionReason:r.rejection_reason}:null;}
 export class PaymentUnitOfWork{
@@ -62,8 +62,16 @@ export class PaymentUnitOfWork{
    method,m.type,m.display_name,m.account_name,m.destination,m.instructions,req);}
  async saveReference(req:string,raw:string,norm:string){await run(this.db,
   "UPDATE payment_requests SET reference=?,normalized_reference=?,status='AWAITING_RECEIPT' WHERE id=?",raw,norm,req);}
+ async saveProof(req:string,proof:string,reference:string|null,normalized:string|null){await run(this.db,
+  "UPDATE payment_requests SET payment_proof_text=?,reference=COALESCE(?,reference),normalized_reference=COALESCE(?,normalized_reference),status='PENDING_REVIEW',submitted_at=CURRENT_TIMESTAMP WHERE id=?",
+  proof,reference,normalized,req);}
  async referenceExists(norm:string,except:string){return (await rows<{id:string|bigint}>(this.db,
   "SELECT id FROM payment_requests WHERE normalized_reference=? AND id<>? LIMIT 1",norm,except)).length>0;}
+ async recordProofSubmitted(user:string,req:string){
+  for(const action of ["PAYMENT_PROOF_SUBMITTED","PAYMENT_SUBMITTED_FOR_REVIEW"]){
+   await run(this.db,"INSERT INTO payment_audit_events(actor_type,actor,action,entity_type,entity_id,metadata,created_at) VALUES('USER',?,?, 'PAYMENT',?,'',CURRENT_TIMESTAMP)",user,action,req);
+  }
+ }
  async saveReceipt(req:string,r:{fileId:string;uniqueId:string;type:string;filename:string|null;mime:string;size:number}){
   await run(this.db,"UPDATE payment_requests SET receipt_file_id=?,receipt_unique_id=?,receipt_type=?,receipt_filename=?,receipt_mime=?,receipt_size=?,status='PENDING_REVIEW',submitted_at=CURRENT_TIMESTAMP WHERE id=?",
    r.fileId,r.uniqueId,r.type,r.filename,r.mime,r.size,req);}

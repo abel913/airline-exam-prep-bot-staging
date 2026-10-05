@@ -19,6 +19,8 @@ public class PaymentReviewService {
   settings.lock();var p=queries.get(id);var target=approve?PaymentStatus.APPROVED:PaymentStatus.REJECTED;
   if(p.status()==target) return p;
   p.status().require(PaymentStatus.PENDING_REVIEW);
+  if((p.paymentProofText()==null||p.paymentProofText().isBlank())&&p.receipt()==null)
+   throw new ExamException("payment.proofInvalid");
   if(!approve&&(reason==null||reason.isBlank()||reason.length()>500||reason.chars().anyMatch(c->c<32&&c!='\n')))
    throw new ExamException("payment.reasonRequired");
   boolean granted=approve&&grants.grant(p,admin);

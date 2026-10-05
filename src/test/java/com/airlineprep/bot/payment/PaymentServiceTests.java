@@ -49,6 +49,44 @@ class PaymentServiceTests extends PaymentFixture {
   assertThatThrownBy(()->payments.receipt(sender,id,receipt("different"))).hasMessage("payment.state");
   assertThatThrownBy(()->payments.cancel(sender,id)).hasMessage("payment.state");
  }
+ @Test void textOnlyProofPreservesFullMessageAndSubmitsExactlyOnce() {
+  long id=selected();String proof="  Dear Customer,\nA debit transaction of ETB 50.00 occurred.\nhttps://provider.example/receipt?id=synthetic  ";
+  var first=payments.submitProof(sender,id,proof);var saved=queries.get(id);
+  assertThat(first.request().status()).isEqualTo(PaymentStatus.PENDING_REVIEW);
+  assertThat(saved.paymentProofText()).isEqualTo(proof.strip());assertThat(saved.reference()).isNull();assertThat(saved.receipt()).isNull();
+  assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM payment_notifications WHERE request_id=? AND kind='ADMIN_PENDING'",Integer.class,id)).isEqualTo(1);
+  assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM payment_audit_events WHERE entity_id=? AND entity_type='PAYMENT' AND action='PAYMENT_SUBMITTED_FOR_REVIEW'",Integer.class,id)).isEqualTo(1);
+  payments.submitProof(sender,id,proof);
+  assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM payment_notifications WHERE request_id=? AND kind='ADMIN_PENDING'",Integer.class,id)).isEqualTo(1);
+  assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM payment_audit_events WHERE entity_id=? AND entity_type='PAYMENT' AND action='PAYMENT_SUBMITTED_FOR_REVIEW'",Integer.class,id)).isEqualTo(1);
+  review.approve(id,"test-admin");review.approve(id,"test-admin");
+  assertThat(grant().getAccessLevel()).isEqualTo("LIFETIME");
+ }
+ @Test void referenceOnlyProofKeepsDuplicateProtectionAndBlankProofIsRejected() {
+  long id=selected();assertThatThrownBy(()->payments.submitProof(sender,id," \n\t ")).hasMessage("payment.proofInvalid");
+  assertThat(queries.get(id).status()).isEqualTo(PaymentStatus.AWAITING_REFERENCE);
+  payments.submitProof(sender,id,"  TXN-889221  ");
+  assertThat(queries.get(id).paymentProofText()).isEqualTo("TXN-889221");
+  assertThat(queries.get(id).reference()).isEqualTo("TXN-889221");
+  assertThat(queries.get(id).normalizedReference()).isEqualTo("TXN-889221");
+  review.reject(id,"test-admin","Synthetic duplicate-reference fixture complete");
+  long second=selected();assertThatThrownBy(()->payments.submitProof(sender,second,"txn-889221")).hasMessage("payment.duplicateReference");
+ }
+ @Test void textProofKeepsExplicitTargetExamAndRejectionDoesNotGrant() {
+  long examA=exam;long userId=users.findByTelegramUserId(sender).orElseThrow().getId();
+  long examB=catalog.save(false,null,new CatalogForm("text-proof-target-"+sender,"Synthetic proof target","",true,1,null),"test-admin");
+  registration.exam(sender,examB);registration.exam(sender,examA);assertSelected(examA);
+  long id=payments.start(sender,examB,"text-proof-target").request().id();payments.select(sender,id,method);
+  payments.submitProof(sender,id,"TARGET-EXAM-TEXT-001");
+  assertThat(queries.get(id).examTypeId()).isEqualTo(examB);assertSelected(examA);
+  review.reject(id,"test-admin","Synthetic text proof rejection");
+  assertThat(grants.findByUserIdAndExamTypeId(userId,examB).orElseThrow().getAccessLevel()).isEqualTo("FREE");assertSelected(examA);
+ }
+ @Test void approvalRejectsPendingPaymentWithoutEitherProofForm() {
+  long id=selected();
+  assertThatThrownBy(()->jdbc.update("UPDATE payment_requests SET status='PENDING_REVIEW',submitted_at=CURRENT_TIMESTAMP WHERE id=?",id))
+   .isInstanceOf(org.springframework.dao.DataAccessException.class);
+ }
  @Test void cancelledAndRejectedReferencesRemainReserved() {
   long id=selected();payments.reference(sender,id,"Reserved-001");payments.cancel(sender,id);payments.cancel(sender,id);
   long second=selected();assertThatThrownBy(()->payments.reference(sender,second,"reserved-001")).hasMessage("payment.duplicateReference");

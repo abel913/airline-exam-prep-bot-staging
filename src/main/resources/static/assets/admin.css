@@ -33,3 +33,4 @@ main button{background:var(--accent);color:white;border:0;border-radius:7px;padd
 .table-wrap { overflow-x: auto; max-width: 100%; }
 .analytics-filters { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 1rem; align-items: end; }
 .table-wrap td, .table-wrap th { padding: .65rem; text-align: left; min-width: 6rem; overflow-wrap: anywhere; }
+.payment-proof { white-space: pre-wrap; overflow-wrap: anywhere; }

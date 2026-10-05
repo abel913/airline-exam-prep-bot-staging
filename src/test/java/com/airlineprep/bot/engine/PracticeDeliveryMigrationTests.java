@@ -20,7 +20,7 @@ class PracticeDeliveryMigrationTests {
         assertUpgrade(url, "sa");
         String freshUrl = "jdbc:h2:mem:practice-fresh-" + UUID.randomUUID() + ";DB_CLOSE_DELAY=-1;LOCK_TIMEOUT=10000";
         Flyway fresh = Flyway.configure().dataSource(freshUrl, "sa", "").load();
-        assertThat(fresh.migrate().targetSchemaVersion).isEqualTo("19");
+        assertThat(fresh.migrate().targetSchemaVersion).isEqualTo("20");
         try (var connection = DriverManager.getConnection(freshUrl, "sa", "")) {
             assertReceiptSchema(connection);
             assertPhase5Schema(connection);
@@ -51,7 +51,7 @@ class PracticeDeliveryMigrationTests {
             assertReceiptSchema(connection);
         }
         Flyway latest = Flyway.configure().dataSource(url, username, "").load();
-        assertThat(latest.migrate().targetSchemaVersion).isEqualTo("19");
+        assertThat(latest.migrate().targetSchemaVersion).isEqualTo("20");
         latest.validate();
         try (var connection = DriverManager.getConnection(url, username, "")) {
             assertReceiptSchema(connection);

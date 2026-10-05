@@ -5,10 +5,11 @@ import { PracticeService, PracticeError } from "../practice-service.mjs";
 
 // This suite deliberately refuses staging/remote URLs. Flyway must first migrate this disposable DB.
 const databaseUrl = Deno.env.get("EDGE_TEST_DATABASE_URL") ?? "";
+const allowedDatabases = new Set(["airline_exam_bot_phase5_test", "airline_exam_bot_phase5_v20_fresh_test", "airline_exam_bot_phase5_v20_final_test", "airline_exam_bot_phase5_v20_verify_test"]);
 const parsed = new URL(databaseUrl);
 if (!['127.0.0.1', 'localhost'].includes(parsed.hostname) || parsed.port !== '5432'
-  || parsed.pathname !== '/airline_exam_bot_phase5_test') {
-  throw new Error("EDGE_TEST_DATABASE_URL must identify 127.0.0.1:5432/airline_exam_bot_phase5_test");
+  || !allowedDatabases.has(parsed.pathname.slice(1))) {
+  throw new Error("EDGE_TEST_DATABASE_URL must identify an allowlisted 127.0.0.1:5432 Phase 5 test database");
 }
 let sequence = BigInt(Date.now()) * 1000n;
 const update = () => String(sequence++);

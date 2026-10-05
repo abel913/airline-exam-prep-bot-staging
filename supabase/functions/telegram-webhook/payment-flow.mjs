@@ -21,6 +21,7 @@ function paymentView(v){
  }else{
   text=message(lang,"payment.summary",p.amount,p.currency,message(lang,"payment.status."+p.status));
   if(p.methodId!==null)text+="\n"+[p.methodName,p.accountName,p.destination,p.instructions].filter(Boolean).join("\n");
+  if(p.status==="AWAITING_REFERENCE"||p.status==="AWAITING_RECEIPT")text+="\n"+message(lang,"payment.proofPrompt");
   if(p.status==="SELECT_METHOD"){
    if(!v.enabled)text+="\n"+message(lang,"payment.disabled");
    else{
@@ -73,14 +74,16 @@ export function createPaymentFlow(service,telegram){
    let lang="en";
    try{
     const v=await service.status(tg);lang=v.student.language;const p=v.request;if(!p)return;
-    if(m.forward_origin!==undefined||m.forward_date!==undefined||m.forward_from!==undefined||
-      m.forward_from_chat!==undefined||m.is_automatic_forward===true)throw new PaymentError("payment.receiptInvalid");
     const text=typeof m.text==="string"?m.text:"";
     if(text.startsWith("/"))return;
-    if(p.status==="AWAITING_REFERENCE"&&typeof m.text==="string"){
-      await send(telegram,chat,paymentView(await service.reference(tg,p.id,text)));return;
+    if(p.status==="AWAITING_REFERENCE"){
+      if(typeof m.text!=="string"){await telegram.sendMessage(chat,message(lang,"payment.proofPrompt"),{inline_keyboard:home(lang)});return;}
+      await send(telegram,chat,paymentView(await service.submitProof(tg,p.id,text)));return;
     }
     if(p.status==="AWAITING_RECEIPT"){
+      if(typeof m.text==="string") {await send(telegram,chat,paymentView(await service.submitProof(tg,p.id,text)));return;}
+      if(m.forward_origin!==undefined||m.forward_date!==undefined||m.forward_from!==undefined||
+        m.forward_from_chat!==undefined||m.is_automatic_forward===true)throw new PaymentError("payment.receiptInvalid");
       await send(telegram,chat,paymentView(await service.receipt(tg,p.id,receiptFromMessage(m))));return;
     }
    }catch(e){if(!(e instanceof PaymentError))throw e;if(e.key==="student.register")return;

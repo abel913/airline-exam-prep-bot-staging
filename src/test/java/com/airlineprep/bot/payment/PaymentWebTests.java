@@ -38,6 +38,14 @@ class PaymentWebTests extends PaymentFixture {
    .andExpect(status().isOk());
   mvc.perform(get("/admin/payment-audit").param("action","PAYMENT_REQUEST_CREATED").param("actorType","USER").with(user("admin").roles("ADMIN"))).andExpect(status().isOk());
  }
+ @Test void textProofIsEscapedAndMultilineInAuthenticatedAdminReview() throws Exception {
+  String proof="Bank confirmation\n<script>alert('x')</script>\nhttps://provider.example/receipt?id=synthetic";
+  jdbc.update("UPDATE payment_requests SET payment_proof_text=?,receipt_file_id=NULL,receipt_unique_id=NULL,receipt_type=NULL,receipt_filename=NULL,receipt_mime=NULL,receipt_size=NULL WHERE id=?",proof,payment);
+  String html=mvc.perform(get("/admin/payments/"+payment).with(user("admin").roles("ADMIN"))).andExpect(status().isOk())
+   .andReturn().getResponse().getContentAsString();
+  assertThat(html).contains("Payment proof","Bank confirmation","&lt;script&gt;alert(&#39;x&#39;)&lt;/script&gt;","https://provider.example/receipt?id=synthetic");
+  assertThat(html).doesNotContain("<script>alert('x')</script>");assertThat(html).contains("class=\"payment-proof\"");
+ }
  @Test void approveIsPostOnlyIdempotentAndAudited() throws Exception {
   mvc.perform(get("/admin/payments/"+payment+"/approve").with(user("admin").roles("ADMIN"))).andExpect(status().isMethodNotAllowed());
   for(int i=0;i<2;i++) mvc.perform(post("/admin/payments/"+payment+"/approve").with(csrf()).with(user("admin").roles("ADMIN"))).andExpect(status().is3xxRedirection());
