@@ -12,6 +12,8 @@ spring:
       max-lifetime: 900000
       keepalive-time: 120000
 server:
+  address: 0.0.0.0
+  port: ${PORT:10000}
   forward-headers-strategy: none
   tomcat:
     use-relative-redirects: true
