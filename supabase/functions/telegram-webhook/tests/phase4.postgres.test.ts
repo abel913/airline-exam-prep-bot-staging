@@ -261,9 +261,11 @@ Deno.test("Phase 4 PostgreSQL: mocks and payments preserve transactional state",
           'questions_per_mock',questions_per_mock,'practice_used',practice_used,'mocks_used',mocks_used,
           'grant_source',grant_source) ORDER BY exam_type_id)::text
           FROM access_entitlements WHERE user_id=u.id),'[]') entitlements,
-        COALESCE((SELECT jsonb_agg(jsonb_build_object('question_id',question_id::text,
-          'first_delivery_id',first_delivery_id::text) ORDER BY question_id)::text
-          FROM practice_usage WHERE user_id=u.id),'[]') practice_usage,
+        COALESCE((SELECT jsonb_agg(jsonb_build_object('question_id',pu.question_id::text,
+          'exam_type_id',pu.exam_type_id::text,'delivery_exam_type_id',pd.exam_type_id::text,
+          'first_delivery_id',pu.first_delivery_id::text) ORDER BY pu.question_id)::text
+          FROM practice_usage pu JOIN practice_deliveries pd ON pd.id=pu.first_delivery_id
+          WHERE pu.user_id=u.id),'[]') practice_usage,
         COALESCE((SELECT jsonb_agg(jsonb_build_object('id',a.id::text,'exam_type_id',a.exam_type_id::text,
           'status',a.status,'question_count',a.question_count,'cursor_position',a.cursor_position,
           'correct_count',a.correct_count,'incorrect_count',a.incorrect_count,'unanswered_count',a.unanswered_count,
