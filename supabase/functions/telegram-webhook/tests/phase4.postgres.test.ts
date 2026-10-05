@@ -222,15 +222,30 @@ Deno.test("Phase 4 PostgreSQL: mocks and payments preserve transactional state",
     await database.transaction(async (c) => {
       for (const questionId of questionIds.slice(1, 3)) {
         const delivery = await c.queryObject<{ id: bigint }>`INSERT INTO practice_deliveries
-          (user_id,question_id,version_id,category_filter,created_at,selected_option,answered_at)
-          SELECT ${otherId},q.id,q.current_version_id,NULL,CURRENT_TIMESTAMP,0,CURRENT_TIMESTAMP
+          (user_id,exam_type_id,question_id,version_id,category_filter,created_at,selected_option,answered_at)
+          SELECT ${otherId},${examId},q.id,q.current_version_id,NULL,CURRENT_TIMESTAMP,0,CURRENT_TIMESTAMP
           FROM questions q WHERE q.id=${questionId} RETURNING id`;
         assert.equal(delivery.rows.length, 1);
-        await c.queryArray`INSERT INTO practice_usage(user_id,question_id,first_delivery_id,created_at)
-          VALUES(${otherId},${questionId},${String(delivery.rows[0].id)},CURRENT_TIMESTAMP)`;
+        await c.queryArray`INSERT INTO practice_usage(user_id,exam_type_id,question_id,first_delivery_id,created_at)
+          VALUES(${otherId},${examId},${questionId},${String(delivery.rows[0].id)},CURRENT_TIMESTAMP)`;
       }
       await c.queryArray`UPDATE access_entitlements SET practice_used=2 WHERE user_id=${otherId} AND exam_type_id=${examId}`;
     });
+    const practiceOwnership = await database.withConnection(async (c) => (await c.queryObject<{
+      deliveries: string;
+      entitlement_count: bigint;
+    }>`SELECT
+        (SELECT jsonb_agg(jsonb_build_object('user_id',user_id::text,'exam_type_id',exam_type_id::text)
+          ORDER BY question_id)::text FROM practice_deliveries
+          WHERE question_id IN (${questionIds[1]},${questionIds[2]})) deliveries,
+        (SELECT COUNT(*) FROM access_entitlements WHERE user_id=${otherId} AND exam_type_id=${examId}) entitlement_count`).rows[0]);
+    const deliveries = JSON.parse(practiceOwnership.deliveries) as Array<{ user_id: string; exam_type_id: string }>;
+    assert.equal(deliveries.length, 2);
+    assert.deepEqual(deliveries, [
+      { user_id: otherId, exam_type_id: examId },
+      { user_id: otherId, exam_type_id: examId },
+    ]);
+    assert.equal(Number(practiceOwnership.entitlement_count), 1, "practice delivery exam belongs to the user's entitlement");
     const languageMock = await mock.prepare(tgLookup(otherId), crypto.randomUUID());
     await mock.open(tgLookup(otherId), languageMock.attempt.id, 0);
     await mock.answer(tgLookup(otherId), languageMock.attempt.id, 0, 0, 0);
