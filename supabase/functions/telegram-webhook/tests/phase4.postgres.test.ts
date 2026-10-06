@@ -76,7 +76,10 @@ Deno.test("Phase 4 PostgreSQL: mocks and payments preserve transactional state",
       };
       userId = await createUser();
       otherId = await createUser();
-      for (let i = 0; i < 4; i++) {
+      // This test prepares four 3-question mocks for one user. Because frozen
+      // logical question IDs are never recycled for the same user and exam,
+      // the fixture must provide twelve distinct eligible questions.
+      for (let i = 0; i < 12; i++) {
         const q = await c.queryObject<{ id: bigint }>`INSERT INTO questions(status,created_by,updated_by,created_at,updated_at)
           VALUES('DRAFT','phase4-test','phase4-test',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP) RETURNING id`;
         const questionId = String(q.rows[0].id);
