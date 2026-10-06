@@ -1,6 +1,6 @@
 import { PostgresDatabase } from "../telegram-webhook/postgres-database.ts";
 import { PostgresStudyReminderSchedulerStore } from "./scheduler-store.ts";
-import { buildReminder } from "./reminder-message.mjs";
+import { buildReminder, isValidSchedulerPayload } from "./reminder-message.mjs";
 
 const secret = Deno.env.get("STUDY_REMINDER_SCHEDULER_SECRET") ?? "";
 const token = Deno.env.get("TELEGRAM_BOT_TOKEN") ?? "";
@@ -93,9 +93,9 @@ Deno.serve(async (request: Request) => {
   if (!secret || !token || !databaseUrl || !constantTimeEqual(secret, supplied)) {
     return new Response(null, { status: 403, headers: { "cache-control": "no-store" } });
   }
-  if (request.headers.get("content-length") && request.headers.get("content-length") !== "0") {
-    return new Response(null, { status: 400 });
-  }
+  const contentLength = request.headers.get("content-length");
+  if (contentLength && Number(contentLength) > 2) return new Response(null, { status: 400 });
+  if (!isValidSchedulerPayload(await request.text())) return new Response(null, { status: 400 });
   try {
     const result = await sendBatch();
     return Response.json(result, { headers: { "cache-control": "no-store" } });

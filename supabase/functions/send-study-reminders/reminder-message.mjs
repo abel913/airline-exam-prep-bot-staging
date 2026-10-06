@@ -2,6 +2,10 @@ import { message } from "../telegram-webhook/domain.mjs";
 
 export const INACTIVITY_MS = 8 * 60 * 60 * 1000;
 
+export function isValidSchedulerPayload(body) {
+  return typeof body === "string" && (body.trim() === "" || body.trim() === "{}");
+}
+
 export function isReminderEligible(user, now = Date.now()) {
   if (!user || user.study_reminders_enabled !== true || user.reminder_delivery_blocked_at) return false;
   if (user.reminder_retry_after && new Date(user.reminder_retry_after).getTime() > now) return false;

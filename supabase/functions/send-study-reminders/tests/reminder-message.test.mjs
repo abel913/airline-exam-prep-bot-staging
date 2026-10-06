@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { buildReminder, INACTIVITY_MS, isReminderEligible } from "../reminder-message.mjs";
+import { buildReminder, INACTIVITY_MS, isReminderEligible, isValidSchedulerPayload } from "../reminder-message.mjs";
 import { createStudyReminderFlow } from "../../telegram-webhook/study-reminder-flow.mjs";
 
 const base = (patch = {}) => ({
@@ -11,6 +11,14 @@ const base = (patch = {}) => ({
   ...patch,
 });
 const now = Date.parse("2026-01-01T08:00:00Z");
+
+test("scheduler accepts an empty body or pg_net's default empty JSON object only", () => {
+  assert.equal(isValidSchedulerPayload(""), true);
+  assert.equal(isValidSchedulerPayload("{}"), true);
+  assert.equal(isValidSchedulerPayload(" \n{} \n"), true);
+  assert.equal(isValidSchedulerPayload('{"batch":1000}'), false);
+  assert.equal(isValidSchedulerPayload("null"), false);
+});
 
 test("inactivity eligibility is strict at 8 hours and respects 8-hour successful-send throttle", () => {
   assert.equal(INACTIVITY_MS, 8 * 60 * 60 * 1000);
