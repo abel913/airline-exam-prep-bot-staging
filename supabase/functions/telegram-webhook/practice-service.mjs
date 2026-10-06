@@ -48,6 +48,14 @@ export class PracticeService {
     }));
   }
 
+  async resume(telegramId) {
+    return await this.withStudent(telegramId, async (unit, student) => {
+      const delivery = await unit.currentDelivery(student);
+      if (!delivery) return null;
+      return view(student, delivery, await unit.frozen(delivery.versionId));
+    });
+  }
+
   /** @param {string} telegramId @param {string} updateId @param {{categoryId?: string | null, previousId?: string | null, review?: boolean}} [options] */
   async next(telegramId, updateId, { categoryId = null, previousId = null, review = false } = {}) {
     if (!/^\d{1,20}$/.test(String(updateId)) || BigInt(updateId) > 9223372036854775807n) throw new PracticeError("student.invalid");

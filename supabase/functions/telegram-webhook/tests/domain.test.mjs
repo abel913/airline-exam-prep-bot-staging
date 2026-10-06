@@ -71,6 +71,18 @@ test("completed main menu exposes Change Language in English and Amharic", () =>
   const am = completedMenu(view("am")).reply_markup.inline_keyboard.flat();
   assert.ok(en.some((button) => button.text === "Change Language" && button.callback_data === "lang:choose"));
   assert.ok(am.some((button) => button.text === "ቋንቋ ቀይር" && button.callback_data === "lang:choose"));
+  assert.ok(en.some((button) => button.text === "Settings" && button.callback_data === "s:settings"));
+  assert.ok(am.some((button) => button.text === "ቅንብሮች" && button.callback_data === "s:settings"));
+});
+
+test("study reminder translations exist in both supported languages", () => {
+  for (const key of ["reminder.title", "reminder.statusOn", "reminder.statusOff", "reminder.turnOn", "reminder.turnOff",
+    "reminder.savedOn", "reminder.savedOff", "reminder.activeMock", "reminder.expiredMock", "reminder.practice",
+    "reminder.newLearner", "reminder.payment", "reminder.chooseExam", "reminder.resumeMock", "reminder.startMock",
+    "reminder.mockHistory", "reminder.continuePractice", "reminder.startPractice", "reminder.continuePayment"]) {
+    assert.notEqual(message("en", key), key, `missing English translation: ${key}`);
+    assert.notEqual(message("am", key), key, `missing Amharic translation: ${key}`);
+  }
 });
 
 test("language selector offers both languages and returns to menu", () => {

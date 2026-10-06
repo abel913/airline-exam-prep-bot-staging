@@ -170,3 +170,19 @@ test("progress math and Telegram callbacks preserve bounded routing", async () =
   assert.equal(sent.length, 1);
   assert.equal(sent[0][2].inline_keyboard[0][0].callback_data, "p:c:0");
 });
+
+test("practice resume returns the existing exam-scoped delivery without charging or creating a new one", async () => {
+  const f = fixture();
+  const initial = await f.service.next("77", "100");
+  const beforeCount = f.deliveries.size;
+  const resumed = await f.service.resume("77");
+  assert.equal(resumed.delivery.id, initial.delivery.id);
+  assert.equal(resumed.question.versionId, initial.question.versionId);
+  assert.equal(f.deliveries.size, beforeCount);
+  assert.equal(f.student.practiceUsed, 0);
+  const sent = [];
+  const flow = createPracticeFlow(f.service, { async sendMessage(...args) { sent.push(args); } });
+  await flow.callback("77", "77", "p:resume", "101");
+  assert.equal(f.deliveries.size, beforeCount);
+  assert.match(sent.at(-1)[1], /Synthetic question q1/);
+});

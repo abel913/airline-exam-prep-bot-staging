@@ -109,7 +109,7 @@ function updateType(update) {
   return "other";
 }
 
-export function createTelegramWebhookHandler({ env, store, practice, mock, payment, telegram, logger = console }) {
+export function createTelegramWebhookHandler({ env, store, practice, mock, payment, reminders, telegram, logger = console }) {
   return async function handleRequest(request) {
     if (request.method === "GET") {
       const config = requiredConfiguration(env);
@@ -170,9 +170,15 @@ export function createTelegramWebhookHandler({ env, store, practice, mock, payme
         return new Response(null, { status: 200 });
       }
 
+      if (typeof store.recordUserActivity === "function") {
+        await store.recordUserActivity(senderId, String(update.update_id));
+      }
+
       if (callback) {
         const data = typeof callback.data === "string" ? callback.data : "";
-        if (data === "lang:choose") {
+        if (/^(?:s:settings|r:on|r:off)$/.test(data) && reminders) {
+          await reminders.callback(chatId, senderId, data);
+        } else if (data === "lang:choose") {
           const view = await store.current(senderId);
           if (view?.status === "COMPLETED") {
             const language = view.language === "am" ? "am" : "en";

@@ -256,3 +256,18 @@ test("health responds without disclosing settings and checks database readiness"
   assert.equal(response.status, 200);
   assert.deepEqual(await response.json(), { status: "ok" });
 });
+
+test("valid private user interactions centrally record activity before flow routing", async () => {
+  const store = fakeStore();
+  const activity = [];
+  store.recordUserActivity = async (...args) => activity.push(args);
+  store.manualPhoneInput = async () => null;
+  const handler = createTelegramWebhookHandler({ env, store, telegram: fakeTelegram() });
+  assert.equal((await handler(makeRequest(privateMessage("/start")))).status, 200);
+  const callback = { update_id: 10, callback_query: { id: "settings", data: "s:settings", from: { id: 77 },
+    message: { chat: { id: 77, type: "private" } } } };
+  const reminders = { async callback(...args) { activity.push(["reminder", ...args]); } };
+  const withReminder = createTelegramWebhookHandler({ env, store, reminders, telegram: fakeTelegram() });
+  assert.equal((await withReminder(makeRequest(callback))).status, 200);
+  assert.deepEqual(activity, [["77", "9"], ["77", "10"], ["reminder", "77", "77", "s:settings"]]);
+});

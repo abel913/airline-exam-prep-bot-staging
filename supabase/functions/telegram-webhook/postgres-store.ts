@@ -299,4 +299,22 @@ export class PostgresRegistrationStore {
   async healthCheck(): Promise<void> {
     return await this.database.healthCheck();
   }
+
+  async recordUserActivity(telegramId: string, updateId: string): Promise<void> {
+    // Telegram retries the same update_id; only a strictly newer user update
+    // advances activity. Incoming activity invalidates any not-yet-sent claim.
+    await this.database.withConnection(async (client) => {
+      await client.queryArray`
+        UPDATE bot_users
+        SET last_user_activity_at = clock_timestamp(),
+            last_activity_update_id = ${updateId}::bigint,
+            reminder_claim_token = NULL,
+            reminder_claimed_at = NULL,
+            reminder_retry_after = NULL,
+            reminder_delivery_blocked_at = NULL
+        WHERE telegram_user_id = ${telegramId}
+          AND (last_activity_update_id IS NULL OR last_activity_update_id < ${updateId}::bigint)
+      `;
+    });
+  }
 }

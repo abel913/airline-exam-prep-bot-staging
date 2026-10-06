@@ -15,12 +15,12 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 class PracticeDeliveryMigrationTests {
     @Test
-    void migratesFreshSchemaAndV16UpgradeThroughPhase5() throws Exception {
+    void migratesFreshSchemaAndV16UpgradeThroughPhase5V21() throws Exception {
         String url = "jdbc:h2:mem:practice-v16-" + UUID.randomUUID() + ";DB_CLOSE_DELAY=-1;LOCK_TIMEOUT=10000";
         assertUpgrade(url, "sa");
         String freshUrl = "jdbc:h2:mem:practice-fresh-" + UUID.randomUUID() + ";DB_CLOSE_DELAY=-1;LOCK_TIMEOUT=10000";
         Flyway fresh = Flyway.configure().dataSource(freshUrl, "sa", "").load();
-        assertThat(fresh.migrate().targetSchemaVersion).isEqualTo("20");
+        assertThat(fresh.migrate().targetSchemaVersion).isEqualTo("21");
         try (var connection = DriverManager.getConnection(freshUrl, "sa", "")) {
             assertReceiptSchema(connection);
             assertPhase5Schema(connection);
@@ -51,7 +51,7 @@ class PracticeDeliveryMigrationTests {
             assertReceiptSchema(connection);
         }
         Flyway latest = Flyway.configure().dataSource(url, username, "").load();
-        assertThat(latest.migrate().targetSchemaVersion).isEqualTo("20");
+        assertThat(latest.migrate().targetSchemaVersion).isEqualTo("21");
         latest.validate();
         try (var connection = DriverManager.getConnection(url, username, "")) {
             assertReceiptSchema(connection);
@@ -101,6 +101,9 @@ class PracticeDeliveryMigrationTests {
         String schema=postgres?"public":"PUBLIC";
         for (var item : java.util.List.of(new String[]{"bot_users","phone_e164"},
                 new String[]{"bot_users","phone_verification_status"},
+                new String[]{"bot_users","last_user_activity_at"},
+                new String[]{"bot_users","last_reminder_sent_at"},
+                new String[]{"bot_users","study_reminders_enabled"},
                 new String[]{"access_entitlements","exam_type_id"},
                 new String[]{"payment_requests","target_exam_type_id"},
                 new String[]{"lifetime_access_grants","exam_type_id"},
@@ -119,5 +122,11 @@ class PracticeDeliveryMigrationTests {
             }
         }
         assertThat(uniqueIndexes.values()).contains(java.util.List.of("ACTIVE_USER_ID"));
+        try (var statement=connection.createStatement();var settings=statement.executeQuery(
+                "SELECT study_reminders_globally_enabled,study_reminders_test_telegram_user_id FROM app_settings WHERE id=1")) {
+            assertThat(settings.next()).isTrue();
+            assertThat(settings.getBoolean(1)).isFalse();
+            assertThat(settings.getObject(2)).isNull();
+        }
     }
 }

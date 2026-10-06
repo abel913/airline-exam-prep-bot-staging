@@ -3,8 +3,8 @@ param(
     [ValidateSet('Phase4AndRemoval','RemovalOnly')]
     [string]$PostgresTestSet = 'Phase4AndRemoval',
     [switch]$JavaOnly,
-    [ValidateSet('airline_exam_bot_phase5_test','airline_exam_bot_phase5_v20_fresh_test','airline_exam_bot_phase5_v20_final_test','airline_exam_bot_phase5_v20_verify_test')]
-    [string]$DatabaseName = 'airline_exam_bot_phase5_v20_verify_test'
+    [ValidateSet('airline_exam_bot_phase5_test','airline_exam_bot_phase5_v20_fresh_test','airline_exam_bot_phase5_v20_final_test','airline_exam_bot_phase5_v21_test')]
+    [string]$DatabaseName = 'airline_exam_bot_phase5_v21_test'
 )
 
 $ErrorActionPreference = 'Stop'
@@ -15,6 +15,7 @@ $root = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
 $testFile = Join-Path $root 'supabase/functions/telegram-webhook/tests/phase4.postgres.test.ts'
 $practiceTestFile = Join-Path $root 'supabase/functions/telegram-webhook/tests/practice.postgres.test.ts'
 $mockTestFile = Join-Path $root 'supabase/functions/telegram-webhook/tests/mock.postgres.test.ts'
+$reminderTestFile = Join-Path $root 'supabase/functions/telegram-webhook/tests/study-reminder.postgres.test.ts'
 $javaTests = @(
     (Join-Path $root 'src/test/java/com/airlineprep/bot/payment/Phase4PostgresIT.java'),
     (Join-Path $root 'src/test/java/com/airlineprep/bot/payment/PaymentPostgresIT.java'),
@@ -92,15 +93,15 @@ try {
     }
     $failureStage = 'Flyway migration inventory'
     if (-not (Test-Path -LiteralPath $testFile) -or -not (Test-Path -LiteralPath $practiceTestFile) -or
-        -not (Test-Path -LiteralPath $mockTestFile) -or
+        -not (Test-Path -LiteralPath $mockTestFile) -or -not (Test-Path -LiteralPath $reminderTestFile) -or
         @($javaTests | Where-Object { -not (Test-Path -LiteralPath $_) }).Count -gt 0) { Stop-Safely 'Phase 5 integration test source is missing.' }
     $sqlMigrations = @(Get-ChildItem (Join-Path $root 'src/main/resources/db/migration') -Filter 'V*__*.sql' -File |
         ForEach-Object { if ($_.Name -match '^V([0-9]+)__') { [int]$Matches[1] } } | Sort-Object -Unique)
     $javaMigrations = @(Get-ChildItem (Join-Path $root 'src/main/java/db/migration') -Filter 'V*__*.java' -File |
         ForEach-Object { if ($_.Name -match '^V([0-9]+)__') { [int]$Matches[1] } } | Sort-Object -Unique)
-    if (($sqlMigrations + $javaMigrations | Sort-Object -Unique).Count -ne 20 -or
-        ($sqlMigrations + $javaMigrations | Sort-Object -Unique)[-1] -ne 20 -or
-        16 -notin $javaMigrations -or 17 -notin $javaMigrations -or 18 -notin $javaMigrations -or 19 -notin $javaMigrations) { Stop-Safely 'Expected the complete SQL and Java Flyway migration set V1–V20.' }
+    if (($sqlMigrations + $javaMigrations | Sort-Object -Unique).Count -ne 21 -or
+        ($sqlMigrations + $javaMigrations | Sort-Object -Unique)[-1] -ne 21 -or
+        16 -notin $javaMigrations -or 17 -notin $javaMigrations -or 18 -notin $javaMigrations -or 19 -notin $javaMigrations) { Stop-Safely 'Expected the complete SQL and Java Flyway migration set V1–V21.' }
 
     $failureStage = 'local PostgreSQL service and client discovery'
     $service = Get-Service -Name 'postgresql-x64-18' -ErrorAction SilentlyContinue
@@ -158,8 +159,8 @@ try {
         $hasFlyway = Invoke-LocalPsql $dbName "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema='public' AND table_name='flyway_schema_history';" -Quiet
         if ($hasFlyway -ne '1') { Stop-Safely 'The existing named test database contains tables but no Flyway history; refusing to overwrite unknown data.' }
         $version = Invoke-LocalPsql $dbName "SELECT COALESCE(MAX(version::int),0) FROM flyway_schema_history WHERE success;" -Quiet
-        if ([int]$version -gt 20) { Stop-Safely 'The isolated test database has a migration newer than V20.' }
-        if ([int]$version -notin @(17,18,19,20)) { Stop-Safely 'The isolated test database must be at Flyway V17, V18, V19, or V20 before synthetic cleanup is considered.' }
+        if ([int]$version -gt 21) { Stop-Safely 'The isolated test database has a migration newer than V21.' }
+        if ([int]$version -notin @(17,18,19,20,21)) { Stop-Safely 'The isolated test database must be at Flyway V17, V18, V19, V20, or V21 before synthetic cleanup is considered.' }
 
         # The integration fixtures are rooted only by their exact synthetic exam
         # markers. Deno uses phase4- plus eight hex digits; Spring uses the fixed
@@ -430,27 +431,27 @@ END $$;
             if (-not $denoCommand) { Stop-Safely 'Deno installed but is unavailable in this PowerShell session.' }
         }
         $failureStage = 'Deno dependency resolution and local PostgreSQL Edge integration test'
-        $denoFiles = @($practiceTestFile, $testFile, $mockTestFile)
+        $denoFiles = @($practiceTestFile, $testFile, $mockTestFile, $reminderTestFile)
         $denoTotalPassed = 0
         $denoTotalFailed = 0
         $denoTotalFiles = 0
         foreach ($denoFile in $denoFiles) {
             $denoName = Split-Path -Leaf $denoFile
-            $denoPreviousErrorPreference = $ErrorActionPreference
-            try {
-                # Run each PostgreSQL test file in its own completed process to
-                # avoid Deno's Windows test-worker IPC failure with multi-file runs.
-                $ErrorActionPreference = 'Continue'
-                $denoOutput = @(& $denoCommand.Source test --allow-env=EDGE_TEST_DATABASE_URL --allow-net=127.0.0.1,localhost $denoFile 2>&1)
-                $denoExitCode = $LASTEXITCODE
-            } finally {
-                $ErrorActionPreference = $denoPreviousErrorPreference
-            }
             $denoStdout = [Collections.Generic.List[string]]::new()
             $denoStderr = [Collections.Generic.List[string]]::new()
-            foreach ($entry in $denoOutput) {
-                if ($entry -is [Management.Automation.ErrorRecord]) { $denoStderr.Add([string]$entry) }
-                else { $denoStdout.Add([string]$entry) }
+            $denoStdoutFile = Join-Path ([IO.Path]::GetTempPath()) ("phase5-deno-{0}-stdout.log" -f [guid]::NewGuid().ToString('N'))
+            $denoStderrFile = Join-Path ([IO.Path]::GetTempPath()) ("phase5-deno-{0}-stderr.log" -f [guid]::NewGuid().ToString('N'))
+            try {
+                # Isolate each test file and redirect native streams to files.
+                # PowerShell's native pipeline capture can invalidate Deno's
+                # Windows worker pipes during PostgreSQL integration tests.
+                $denoArgs = @('test','--parallel=false','--allow-env=EDGE_TEST_DATABASE_URL','--allow-net=127.0.0.1,localhost',('"{0}"' -f $denoFile))
+                $denoProcess = Start-Process -FilePath $denoCommand.Source -ArgumentList $denoArgs -Wait -PassThru -NoNewWindow -RedirectStandardOutput $denoStdoutFile -RedirectStandardError $denoStderrFile
+                $denoExitCode = $denoProcess.ExitCode
+                if (Test-Path -LiteralPath $denoStdoutFile) { foreach ($line in Get-Content -LiteralPath $denoStdoutFile -ErrorAction Stop) { $denoStdout.Add([string]$line) } }
+                if (Test-Path -LiteralPath $denoStderrFile) { foreach ($line in Get-Content -LiteralPath $denoStderrFile -ErrorAction Stop) { $denoStderr.Add([string]$line) } }
+            } finally {
+                Remove-Item -LiteralPath $denoStdoutFile,$denoStderrFile -Force -ErrorAction SilentlyContinue
             }
             foreach ($line in $denoStdout) {
                 if (-not [string]::IsNullOrWhiteSpace($line)) { Write-Output "DENO $denoName`: $(Protect-ProcessText $line)" }
@@ -490,7 +491,7 @@ END $$;
     # admin credential only for these read-only final database checks.
     [Environment]::SetEnvironmentVariable('PGPASSWORD', $pgPassword, 'Process')
     $latest = Invoke-LocalPsql $dbName "SELECT COALESCE(MAX(version::int),0) FROM flyway_schema_history WHERE success;" -Quiet
-    if ($latest -ne '20') { Stop-Safely 'Flyway did not finish at V20.' }
+    if ($latest -ne '21') { Stop-Safely 'Flyway did not finish at V21.' }
     $left = Invoke-LocalPsql $dbName "SELECT (SELECT COUNT(*) FROM exam_types)+(SELECT COUNT(*) FROM categories)+(SELECT COUNT(*) FROM bot_users)+(SELECT COUNT(*) FROM questions)+(SELECT COUNT(*) FROM payment_requests)+(SELECT COUNT(*) FROM mock_attempts)+(SELECT COUNT(*) FROM payment_methods)+(SELECT COUNT(*) FROM access_entitlements)+(SELECT COUNT(*) FROM practice_deliveries)+(SELECT COUNT(*) FROM practice_usage)+(SELECT COUNT(*) FROM practice_sessions)+(SELECT COUNT(*) FROM practice_update_receipts);" -Quiet
     if ([int]$left -ne 0) { Stop-Safely 'Synthetic fixture cleanup check found remaining test rows; database is preserved for inspection.' }
     $testsPassed = $true
@@ -520,7 +521,7 @@ Write-Output 'PHASE 5 LOCAL POSTGRES INTEGRATION: BLOCKED / FAIL'
 }
 Write-Output 'PHASE 5 LOCAL POSTGRES INTEGRATION: PASS'
 Write-Output "POSTGRES: PostgreSQL 18 local loopback; dedicated $dbName; synthetic fixtures cleaned."
-Write-Output 'FLYWAY: V1–V20 applied by Spring Boot; SQL and Java migrations included; final version 20.'
+Write-Output 'FLYWAY: V1–V21 applied by Spring Boot; SQL and Java migrations included; final version 21.'
 Write-Output 'PHASE 4 MOCK TESTS: creation, first answer charge, duplicate callback, resume, timer, frozen versions, scoring, zero-answer expiry PASS.'
 Write-Output 'PHASE 4 PAYMENT TESTS: request creation, duplicate reference, duplicate update, approval idempotency, rejection, entitlement visibility PASS.'
 Write-Output 'No staging or production database was contacted.'

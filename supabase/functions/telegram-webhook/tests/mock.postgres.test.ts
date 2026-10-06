@@ -11,7 +11,7 @@ const allowedDatabases = new Set([
   "airline_exam_bot_phase5_test",
   "airline_exam_bot_phase5_v20_fresh_test",
   "airline_exam_bot_phase5_v20_final_test",
-  "airline_exam_bot_phase5_v20_verify_test",
+  "airline_exam_bot_phase5_v21_test",
 ]);
 const parsed = databaseUrl ? new URL(databaseUrl) : null;
 if (!parsed || !["postgres:", "postgresql:"].includes(parsed.protocol)
@@ -83,7 +83,7 @@ Deno.test("PostgreSQL: mock auto-next, server timer, expiry/restart and user+exa
   try {
     const latest = await database.withConnection(async (c) => (await c.queryObject<{ version: string }>`
       SELECT version FROM flyway_schema_history WHERE success=TRUE ORDER BY installed_rank DESC LIMIT 1`).rows[0]?.version);
-    assert.equal(latest, "20", "isolated database must be at V20");
+    assert.equal(latest, "21", "isolated database must be at V21");
     originalDuration = await database.withConnection(async (c) => (await c.queryObject<{ duration: number | null }>`
       SELECT mock_duration_minutes AS duration FROM app_settings WHERE id=1`).rows[0].duration);
     hasOriginalDuration = true;

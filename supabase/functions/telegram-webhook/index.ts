@@ -11,6 +11,8 @@ import { PostgresPaymentStore } from "./payment-store.ts";
 import { PaymentService } from "./payment-service.mjs";
 import { createPaymentFlow } from "./payment-flow.mjs";
 import { TelegramApiClient } from "./telegram-api.ts";
+import { PostgresStudyReminderStore } from "./study-reminder-store.ts";
+import { createStudyReminderFlow } from "./study-reminder-flow.mjs";
 
 const env = {
   TELEGRAM_BOT_TOKEN: Deno.env.get("TELEGRAM_BOT_TOKEN") ?? "",
@@ -29,6 +31,8 @@ const mock = new MockService(mockStore);
 const paymentStore = new PostgresPaymentStore(database);
 const payment = new PaymentService(paymentStore,{adminId:env.TELEGRAM_ADMIN_ID});
 const telegram = new TelegramApiClient(() => env.TELEGRAM_BOT_TOKEN);
+const reminderStore = new PostgresStudyReminderStore(database);
+const reminders = createStudyReminderFlow(reminderStore, telegram);
 
 Deno.serve(createTelegramWebhookHandler({ env, store, practice: createPracticeFlow(practice, telegram),
-  mock: createMockFlow(mock, telegram), payment: createPaymentFlow(payment, telegram), telegram }));
+  mock: createMockFlow(mock, telegram), payment: createPaymentFlow(payment, telegram), reminders, telegram }));

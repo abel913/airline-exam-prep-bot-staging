@@ -33,7 +33,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 @Transactional
 class RegisteredUserRemovalPostgresIT {
     private static final java.util.Set<String> TEST_DATABASES = java.util.Set.of(
-        "airline_exam_bot_phase5_test", "airline_exam_bot_phase5_v20_fresh_test", "airline_exam_bot_phase5_v20_final_test", "airline_exam_bot_phase5_v20_verify_test");
+        "airline_exam_bot_phase5_test", "airline_exam_bot_phase5_v20_fresh_test", "airline_exam_bot_phase5_v20_final_test", "airline_exam_bot_phase5_v21_test");
 
     @DynamicPropertySource
     static void isolatedPostgres(DynamicPropertyRegistry registry) {
@@ -64,7 +64,7 @@ class RegisteredUserRemovalPostgresIT {
     @Test
     void removesOnlySelectedUsersCompleteHistoryAndAllowsSameIdentityToRegisterAgain() throws Exception {
         assertThat(jdbc.queryForObject("SELECT current_database()",String.class)).isIn(TEST_DATABASES);
-        assertThat(jdbc.queryForObject("SELECT version FROM flyway_schema_history WHERE success ORDER BY installed_rank DESC LIMIT 1",String.class)).isEqualTo("20");
+        assertThat(jdbc.queryForObject("SELECT version FROM flyway_schema_history WHERE success ORDER BY installed_rank DESC LIMIT 1",String.class)).isEqualTo("21");
         String suffix=UUID.randomUUID().toString().replace("-","").substring(0,12);
         settings.update(new SettingsForm(10,2,1,new BigDecimal("1.00"),"ETB",true,true,"synthetic integration",1),"phase5-remove-test");
         long examA=catalog.save(false,null,new CatalogForm("rm-a-"+suffix,"Synthetic Removal Exam A","",true,0,null),"phase5-remove-test");

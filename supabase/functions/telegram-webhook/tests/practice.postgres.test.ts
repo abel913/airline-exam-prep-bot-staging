@@ -5,7 +5,7 @@ import { PracticeService, PracticeError } from "../practice-service.mjs";
 
 // This suite deliberately refuses staging/remote URLs. Flyway must first migrate this disposable DB.
 const databaseUrl = Deno.env.get("EDGE_TEST_DATABASE_URL") ?? "";
-const allowedDatabases = new Set(["airline_exam_bot_phase5_test", "airline_exam_bot_phase5_v20_fresh_test", "airline_exam_bot_phase5_v20_final_test", "airline_exam_bot_phase5_v20_verify_test"]);
+const allowedDatabases = new Set(["airline_exam_bot_phase5_test", "airline_exam_bot_phase5_v20_fresh_test", "airline_exam_bot_phase5_v20_final_test", "airline_exam_bot_phase5_v21_test"]);
 const parsed = new URL(databaseUrl);
 if (!['127.0.0.1', 'localhost'].includes(parsed.hostname) || parsed.port !== '5432'
   || !allowedDatabases.has(parsed.pathname.slice(1))) {

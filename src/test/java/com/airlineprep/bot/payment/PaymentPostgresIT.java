@@ -18,7 +18,7 @@ import static org.assertj.core.api.Assertions.*;
   "registration.phone-hmac-key=dGVzdC1vbmx5LWtleS0zMi1ieXRlcy1ub3QtYS1zZWNyZXQ="})
 @Transactional
 class PaymentPostgresIT {
- private static final java.util.Set<String> TEST_DATABASES=java.util.Set.of("airline_exam_bot_phase5_test","airline_exam_bot_phase5_v20_fresh_test","airline_exam_bot_phase5_v20_final_test","airline_exam_bot_phase5_v20_verify_test");
+ private static final java.util.Set<String> TEST_DATABASES=java.util.Set.of("airline_exam_bot_phase5_test","airline_exam_bot_phase5_v20_fresh_test","airline_exam_bot_phase5_v20_final_test","airline_exam_bot_phase5_v21_test");
  @DynamicPropertySource
  static void isolatedLocalPostgres(DynamicPropertyRegistry registry) {
   String host=System.getenv("PHASE4_PG_HOST"), port=System.getenv("PHASE4_PG_PORT"), database=System.getenv("PHASE4_PG_DATABASE");
@@ -57,7 +57,7 @@ class PaymentPostgresIT {
   assertThat(queries.get(first).amount()).isEqualByComparingTo("50");
  }
  @Test void textProofPersistsWithoutReceiptAndReviewsOnlyItsTargetExam() {
-  assertThat(jdbc.queryForObject("SELECT version FROM flyway_schema_history WHERE success ORDER BY installed_rank DESC LIMIT 1",String.class)).isEqualTo("20");
+  assertThat(jdbc.queryForObject("SELECT version FROM flyway_schema_history WHERE success ORDER BY installed_rank DESC LIMIT 1",String.class)).isEqualTo("21");
   String suffix=UUID.randomUUID().toString();long sender=8000000000000L+Math.floorMod(suffix.hashCode(),1000000000);
   String codeSuffix=suffix.replace("-","").substring(0,12);
   long examA=catalog.save(false,null,new CatalogForm("proof-a-"+codeSuffix,"Synthetic Exam A","",true,0,null),"verification");

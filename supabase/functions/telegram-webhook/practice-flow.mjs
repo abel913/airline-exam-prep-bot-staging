@@ -158,6 +158,12 @@ export function createPracticeFlow(service, telegram) {
       await send(chatId, categoryView(await service.categories(telegramId, 0)));
       return;
     }
+    if (data === "p:resume") {
+      const current = await service.resume(telegramId);
+      if (current) await send(chatId, displayQuestion(current));
+      else await send(chatId, categoryView(await service.categories(telegramId, 0)));
+      return;
+    }
     if (data === "s:progress") {
       await send(chatId, progressView(await service.progress(telegramId)));
       return;
