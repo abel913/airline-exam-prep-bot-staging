@@ -143,13 +143,16 @@ Deno.test("PostgreSQL: mock auto-next, server timer, expiry/restart and user+exa
       FROM mock_attempts WHERE id=${firstId}`).rows[0]);
     assert.equal(timer.seconds, 7200);
     await database.transaction(async (c) => {
-      await c.queryArray`UPDATE mock_attempts SET started_at=started_at-INTERVAL '1 minute' WHERE id=${firstId}`;
+      await c.queryArray`UPDATE mock_attempts SET deadline_at=deadline_at-INTERVAL '1 minute' WHERE id=${firstId}`;
     });
     const remainingAfterDelay = await database.withConnection(async (c) => Number((await c.queryObject<{ seconds: number }>`
       SELECT GREATEST(0,FLOOR(EXTRACT(EPOCH FROM(deadline_at-clock_timestamp())))::integer) AS seconds
       FROM mock_attempts WHERE id=${firstId}`).rows[0].seconds));
     assert.ok(remainingAfterDelay < opened.secondsRemaining! - 50 && remainingAfterDelay > opened.secondsRemaining! - 70,
       "countdown follows server time without wall-clock sleeps");
+    await database.transaction(async (c) => {
+      await c.queryArray`UPDATE mock_attempts SET deadline_at=${timer.deadline} WHERE id=${firstId}`;
+    });
     const q1 = await Promise.all([
       mocks[0].answer(telegramA, firstId, 0, 0, opened.item.revision),
       mocks[1].answer(telegramA, firstId, 0, 0, opened.item.revision),
