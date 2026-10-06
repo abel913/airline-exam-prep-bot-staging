@@ -273,8 +273,8 @@ Deno.test("PostgreSQL: mock auto-next, server timer, expiry/restart and user+exa
 
     const otherStudent = await database.withConnection(async (c) => new MockUnitOfWork(c).student(telegramOther));
     assert.ok(otherStudent);
-    assert.equal(await database.withConnection(async (c) => new MockUnitOfWork(c).eligibleCount(otherStudent!)), 13,
-      "another user retains the full exam A question pool despite this user's frozen history");
+    assert.equal(await database.withConnection(async (c) => new MockUnitOfWork(c).eligibleCount(otherStudent!)), 12,
+      "another user retains every eligible exam A question despite this user's frozen history");
     const otherUserMock = await mocks[0].prepare(telegramOther, "phase5-mock-other-user");
     const otherUserItems = await frozen(otherUserMock.attempt.id);
     assert.equal(otherUserItems.length, 3);
