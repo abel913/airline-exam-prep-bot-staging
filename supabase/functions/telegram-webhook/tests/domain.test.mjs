@@ -79,7 +79,8 @@ test("study reminder translations exist in both supported languages", () => {
   for (const key of ["reminder.title", "reminder.statusOn", "reminder.statusOff", "reminder.turnOn", "reminder.turnOff",
     "reminder.savedOn", "reminder.savedOff", "reminder.activeMock", "reminder.expiredMock", "reminder.practice",
     "reminder.newLearner", "reminder.payment", "reminder.chooseExam", "reminder.resumeMock", "reminder.startMock",
-    "reminder.mockHistory", "reminder.continuePractice", "reminder.startPractice", "reminder.continuePayment"]) {
+    "reminder.mockHistory", "reminder.continuePractice", "reminder.startPractice", "reminder.continuePayment",
+    "reminder.pendingReview"]) {
     assert.notEqual(message("en", key), key, `missing English translation: ${key}`);
     assert.notEqual(message("am", key), key, `missing Amharic translation: ${key}`);
   }

@@ -6,7 +6,7 @@ import { PostgresStudyReminderSchedulerStore } from "../../send-study-reminders/
 
 const databaseUrl = Deno.env.get("EDGE_TEST_DATABASE_URL") ?? "";
 const allowed = new Set(["airline_exam_bot_phase5_test", "airline_exam_bot_phase5_v20_fresh_test",
-  "airline_exam_bot_phase5_v20_final_test", "airline_exam_bot_phase5_v21_test"]);
+  "airline_exam_bot_phase5_v20_final_test", "airline_exam_bot_phase5_v21_test", "airline_exam_bot_phase5_test"]);
 const parsed = databaseUrl ? new URL(databaseUrl) : null;
 if (!parsed || !["postgres:", "postgresql:"].includes(parsed.protocol)
   || !["127.0.0.1", "localhost"].includes(parsed.hostname) || parsed.port !== "5432"
@@ -27,11 +27,12 @@ Deno.test("PostgreSQL reminders: exact inactivity boundary, throttle, activity i
   let examId: string | null = null;
   let userId: string | null = null;
   let attemptId: string | null = null;
-  let originalReminderSettings: { enabled: boolean; testTelegramId: string | bigint | null } | null = null;
+  let originalReminderSettings: { enabled: boolean; startAt: Date | string | null; endAt: Date | string | null; testTelegramId: string | bigint | null } | null = null;
   try {
     originalReminderSettings = await database.withConnection(async (client) =>
-      (await client.queryObject<{ enabled: boolean; testTelegramId: string | bigint | null }>`
+      (await client.queryObject<{ enabled: boolean; startAt: Date | string | null; endAt: Date | string | null; testTelegramId: string | bigint | null }>`
         SELECT study_reminders_globally_enabled AS enabled,
+          study_reminders_start_at AS "startAt",study_reminders_end_at AS "endAt",
           study_reminders_test_telegram_user_id AS "testTelegramId" FROM app_settings WHERE id=1
       `).rows[0]);
     await database.transaction(async (client) => {
@@ -69,7 +70,24 @@ Deno.test("PostgreSQL reminders: exact inactivity boundary, throttle, activity i
 
     await database.withConnection(async (client) => {
       await client.queryArray`UPDATE app_settings SET study_reminders_globally_enabled=FALSE,
-        study_reminders_test_telegram_user_id=${telegramId} WHERE id=1`;
+        study_reminders_start_at=CURRENT_TIMESTAMP-INTERVAL '1 hour',
+        study_reminders_end_at=CURRENT_TIMESTAMP+INTERVAL '1 hour' WHERE id=1`;
+    });
+    assert.equal((await scheduler.claimBatch(10)).length, 0, "campaign OFF blocks reminders");
+    await database.withConnection(async (client) => {
+      await client.queryArray`UPDATE app_settings SET study_reminders_globally_enabled=TRUE,
+        study_reminders_start_at=CURRENT_TIMESTAMP+INTERVAL '1 hour',
+        study_reminders_end_at=CURRENT_TIMESTAMP+INTERVAL '2 hours' WHERE id=1`;
+    });
+    assert.equal((await scheduler.claimBatch(10)).length, 0, "scheduled campaign blocks before start");
+    await database.withConnection(async (client) => {
+      await client.queryArray`UPDATE app_settings SET study_reminders_start_at=CURRENT_TIMESTAMP-INTERVAL '2 hours',
+        study_reminders_end_at=CURRENT_TIMESTAMP-INTERVAL '1 hour' WHERE id=1`;
+    });
+    assert.equal((await scheduler.claimBatch(10)).length, 0, "expired campaign blocks after end");
+    await database.withConnection(async (client) => {
+      await client.queryArray`UPDATE app_settings SET study_reminders_start_at=CURRENT_TIMESTAMP-INTERVAL '1 hour',
+        study_reminders_end_at=CURRENT_TIMESTAMP+INTERVAL '1 hour' WHERE id=1`;
     });
     const [firstClaims, overlappingClaims] = await Promise.all([
       scheduler.claimBatch(10), overlappingScheduler.claimBatch(10),
@@ -79,6 +97,13 @@ Deno.test("PostgreSQL reminders: exact inactivity boundary, throttle, activity i
     assert.equal(String(candidate.id), userId);
     assert.equal(candidate.latest_mock_status, "IN_PROGRESS");
     assert.equal(String(candidate.latest_mock_id), attemptId);
+    await database.withConnection(async (client) => {
+      await client.queryArray`UPDATE app_settings SET study_reminders_globally_enabled=FALSE WHERE id=1`;
+    });
+    assert.equal(await scheduler.beginDelivery(userId!, candidate.claim_token), false, "manual OFF blocks claimed reminder before delivery");
+    await database.withConnection(async (client) => {
+      await client.queryArray`UPDATE app_settings SET study_reminders_globally_enabled=TRUE WHERE id=1`;
+    });
     assert.equal(await scheduler.beginDelivery(userId!, candidate.claim_token), true);
     const activityBeforeSend = await database.withConnection(async (client) =>
       (await client.queryObject<{ at: Date }>`SELECT last_user_activity_at AS at FROM bot_users WHERE id=${userId}`).rows[0].at);
@@ -122,6 +147,8 @@ Deno.test("PostgreSQL reminders: exact inactivity boundary, throttle, activity i
   } finally {
     if (originalReminderSettings) await database.withConnection(async (client) => {
       await client.queryArray`UPDATE app_settings SET study_reminders_globally_enabled=${originalReminderSettings!.enabled},
+        study_reminders_start_at=${originalReminderSettings!.startAt},
+        study_reminders_end_at=${originalReminderSettings!.endAt},
         study_reminders_test_telegram_user_id=${originalReminderSettings!.testTelegramId} WHERE id=1`;
     });
     if (userId) await database.transaction(async (client) => {

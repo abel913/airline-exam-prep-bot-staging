@@ -1,0 +1,60 @@
+name: Staging study reminder scheduler
+
+on:
+  schedule:
+    - cron: '0 * * * *'
+  workflow_dispatch:
+
+permissions: {}
+
+concurrency:
+  group: staging-study-reminders-hourly
+  cancel-in-progress: false
+
+jobs:
+  wake-staging-edge:
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - name: Invoke staging reminder scheduler
+        env:
+          STUDY_REMINDER_SCHEDULER_SECRET: ${{ secrets.STUDY_REMINDER_SCHEDULER_SECRET }}
+        run: |
+          python3 - <<'PY'
+          import json
+          import os
+          import sys
+          import urllib.error
+          import urllib.request
+
+          secret = os.environ.get("STUDY_REMINDER_SCHEDULER_SECRET", "")
+          if not secret:
+              print("Scheduler secret is not configured.", file=sys.stderr)
+              sys.exit(1)
+
+          request = urllib.request.Request(
+              "https://tyciufbhpbjztqsiirgw.supabase.co/functions/v1/send-study-reminders",
+              data=b"{}",
+              headers={"content-type": "application/json", "x-study-reminder-secret": secret},
+              method="POST",
+          )
+          try:
+              with urllib.request.urlopen(request, timeout=45) as response:
+                  result = json.loads(response.read())
+                  if response.status != 200 or not isinstance(result, dict):
+                      print("Scheduler returned an invalid response.", file=sys.stderr)
+                      sys.exit(1)
+          except urllib.error.HTTPError as error:
+              print(f"Scheduler request failed with HTTP {error.code}.", file=sys.stderr)
+              sys.exit(1)
+          except Exception as error:
+              print(f"Scheduler request failed ({type(error).__name__}).", file=sys.stderr)
+              sys.exit(1)
+
+          keys = ("claimed", "sent", "blocked", "retry", "stale")
+          safe_counts = {key: result.get(key) for key in keys}
+          if any(type(value) is not int or value < 0 for value in safe_counts.values()):
+              print("Scheduler returned invalid aggregate counts.", file=sys.stderr)
+              sys.exit(1)
+          print("Study reminder scheduler completed: " + json.dumps(safe_counts, sort_keys=True))
+          PY

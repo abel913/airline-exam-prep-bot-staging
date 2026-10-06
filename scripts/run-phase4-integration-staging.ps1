@@ -99,9 +99,9 @@ try {
         ForEach-Object { if ($_.Name -match '^V([0-9]+)__') { [int]$Matches[1] } } | Sort-Object -Unique)
     $javaMigrations = @(Get-ChildItem (Join-Path $root 'src/main/java/db/migration') -Filter 'V*__*.java' -File |
         ForEach-Object { if ($_.Name -match '^V([0-9]+)__') { [int]$Matches[1] } } | Sort-Object -Unique)
-    if (($sqlMigrations + $javaMigrations | Sort-Object -Unique).Count -ne 21 -or
-        ($sqlMigrations + $javaMigrations | Sort-Object -Unique)[-1] -ne 21 -or
-        16 -notin $javaMigrations -or 17 -notin $javaMigrations -or 18 -notin $javaMigrations -or 19 -notin $javaMigrations) { Stop-Safely 'Expected the complete SQL and Java Flyway migration set V1–V21.' }
+    if (($sqlMigrations + $javaMigrations | Sort-Object -Unique).Count -ne 22 -or
+        ($sqlMigrations + $javaMigrations | Sort-Object -Unique)[-1] -ne 22 -or
+        16 -notin $javaMigrations -or 17 -notin $javaMigrations -or 18 -notin $javaMigrations -or 19 -notin $javaMigrations) { Stop-Safely 'Expected the complete SQL and Java Flyway migration set V1–V22.' }
 
     $failureStage = 'local PostgreSQL service and client discovery'
     $service = Get-Service -Name 'postgresql-x64-18' -ErrorAction SilentlyContinue
@@ -159,8 +159,8 @@ try {
         $hasFlyway = Invoke-LocalPsql $dbName "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema='public' AND table_name='flyway_schema_history';" -Quiet
         if ($hasFlyway -ne '1') { Stop-Safely 'The existing named test database contains tables but no Flyway history; refusing to overwrite unknown data.' }
         $version = Invoke-LocalPsql $dbName "SELECT COALESCE(MAX(version::int),0) FROM flyway_schema_history WHERE success;" -Quiet
-        if ([int]$version -gt 21) { Stop-Safely 'The isolated test database has a migration newer than V21.' }
-        if ([int]$version -notin @(17,18,19,20,21)) { Stop-Safely 'The isolated test database must be at Flyway V17, V18, V19, V20, or V21 before synthetic cleanup is considered.' }
+        if ([int]$version -gt 22) { Stop-Safely 'The isolated test database has a migration newer than V22.' }
+        if ([int]$version -notin @(17,18,19,20,21,22)) { Stop-Safely 'The isolated test database must be at Flyway V17, V18, V19, V20, V21, or V22 before synthetic cleanup is considered.' }
 
         # The integration fixtures are rooted only by their exact synthetic exam
         # markers. Deno uses phase4- plus eight hex digits; Spring uses the fixed
@@ -491,7 +491,7 @@ END $$;
     # admin credential only for these read-only final database checks.
     [Environment]::SetEnvironmentVariable('PGPASSWORD', $pgPassword, 'Process')
     $latest = Invoke-LocalPsql $dbName "SELECT COALESCE(MAX(version::int),0) FROM flyway_schema_history WHERE success;" -Quiet
-    if ($latest -ne '21') { Stop-Safely 'Flyway did not finish at V21.' }
+    if ($latest -ne '22') { Stop-Safely 'Flyway did not finish at V22.' }
     $left = Invoke-LocalPsql $dbName "SELECT (SELECT COUNT(*) FROM exam_types)+(SELECT COUNT(*) FROM categories)+(SELECT COUNT(*) FROM bot_users)+(SELECT COUNT(*) FROM questions)+(SELECT COUNT(*) FROM payment_requests)+(SELECT COUNT(*) FROM mock_attempts)+(SELECT COUNT(*) FROM payment_methods)+(SELECT COUNT(*) FROM access_entitlements)+(SELECT COUNT(*) FROM practice_deliveries)+(SELECT COUNT(*) FROM practice_usage)+(SELECT COUNT(*) FROM practice_sessions)+(SELECT COUNT(*) FROM practice_update_receipts);" -Quiet
     if ([int]$left -ne 0) { Stop-Safely 'Synthetic fixture cleanup check found remaining test rows; database is preserved for inspection.' }
     $testsPassed = $true
@@ -521,7 +521,7 @@ Write-Output 'PHASE 5 LOCAL POSTGRES INTEGRATION: BLOCKED / FAIL'
 }
 Write-Output 'PHASE 5 LOCAL POSTGRES INTEGRATION: PASS'
 Write-Output "POSTGRES: PostgreSQL 18 local loopback; dedicated $dbName; synthetic fixtures cleaned."
-Write-Output 'FLYWAY: V1–V21 applied by Spring Boot; SQL and Java migrations included; final version 21.'
+Write-Output 'FLYWAY: V1–V22 applied by Spring Boot; SQL and Java migrations included; final version 22.'
 Write-Output 'PHASE 4 MOCK TESTS: creation, first answer charge, duplicate callback, resume, timer, frozen versions, scoring, zero-answer expiry PASS.'
 Write-Output 'PHASE 4 PAYMENT TESTS: request creation, duplicate reference, duplicate update, approval idempotency, rejection, entitlement visibility PASS.'
 Write-Output 'No staging or production database was contacted.'

@@ -6,6 +6,15 @@ export function isValidSchedulerPayload(body) {
   return typeof body === "string" && (body.trim() === "" || body.trim() === "{}");
 }
 
+export function campaignStatus({ enabled, startAt, endAt }, now = Date.now()) {
+  if (enabled !== true || !startAt || !endAt) return "OFF";
+  const start = new Date(startAt).getTime(), end = new Date(endAt).getTime();
+  if (!Number.isFinite(start) || !Number.isFinite(end) || end <= start) return "OFF";
+  if (now < start) return "SCHEDULED";
+  if (now > end) return "EXPIRED";
+  return "ACTIVE";
+}
+
 export function isReminderEligible(user, now = Date.now()) {
   if (!user || user.study_reminders_enabled !== true || user.reminder_delivery_blocked_at) return false;
   if (user.reminder_retry_after && new Date(user.reminder_retry_after).getTime() > now) return false;
@@ -27,6 +36,8 @@ export function buildReminder(user) {
   const mockAvailable = !free || Number(user.mock_limit) > Number(user.mocks_used);
   const hasFreePractice = free && practiceAvailable;
 
+  if (user.payment_pending_review && !practiceAvailable && !mockAvailable && !user.active_mock_id) return null;
+
   if (!user.exam_active) {
     text = message(language, "reminder.chooseExam");
     rows.push([button(language, "student.switchExam", "s:exams")], menu(language));
@@ -37,6 +48,12 @@ export function buildReminder(user) {
     text = message(language, "reminder.expiredMock");
     if (mockAvailable) rows.push([button(language, "reminder.startMock", "m:intro")]);
     rows.push([button(language, "reminder.mockHistory", "s:mh:0")], menu(language));
+  } else if (user.payment_pending_review) {
+    if (!practiceAvailable && !mockAvailable) return null;
+    text = message(language, "reminder.pendingReview");
+    if (practiceAvailable) rows.push([button(language, user.has_practice ? "reminder.continuePractice" : "reminder.startPractice", user.has_practice ? "p:resume" : "p:menu")]);
+    if (mockAvailable) rows.push([button(language, "reminder.startMock", "m:intro")]);
+    rows.push(menu(language));
   } else if (user.payment_request_id) {
     text = message(language, "reminder.payment");
     rows.push([button(language, "reminder.continuePayment", "pay:status")],

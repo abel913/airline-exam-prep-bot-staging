@@ -45,11 +45,6 @@ async function sendBatch(): Promise<{ claimed: number; sent: number; blocked: nu
   let sent = 0, blocked = 0, retry = 0, stale = 0;
   for (const candidate of candidates) {
     const userId = String(candidate.id), claimToken = candidate.claim_token;
-    if (!await schedulerStore.beginDelivery(userId, claimToken)) {
-      await schedulerStore.finishClaim(userId, claimToken, "retry", 0);
-      stale++;
-      continue;
-    }
     const user = {
       ...candidate,
       active_mock_id: candidate.latest_mock_id !== null
@@ -64,8 +59,21 @@ async function sendBatch(): Promise<{ claimed: number; sent: number; blocked: nu
         ? String(candidate.latest_mock_id) : null,
       payment_request_id: candidate.payment_request_id === null ? null : String(candidate.payment_request_id),
     };
+    const reminder = buildReminder(user);
+    if (!reminder) {
+      await schedulerStore.finishClaim(userId, claimToken, "retry", 0);
+      stale++;
+      continue;
+    }
+    // Recheck campaign and user eligibility immediately before the outbound
+    // Telegram request so an administrator's OFF switch stops later sends.
+    if (!await schedulerStore.beginDelivery(userId, claimToken)) {
+      await schedulerStore.finishClaim(userId, claimToken, "retry", 0);
+      stale++;
+      continue;
+    }
     try {
-      const result = await telegramSend(String(candidate.telegram_user_id), buildReminder(user).text, buildReminder(user).reply_markup);
+      const result = await telegramSend(String(candidate.telegram_user_id), reminder.text, reminder.reply_markup);
       if (result.ok) {
         await schedulerStore.finishClaim(userId, claimToken, "sent");
         sent++;

@@ -15,7 +15,7 @@ concurrency:
 
 jobs:
   postgres-integration:
-    name: PostgreSQL 17 / Spring Flyway V20 / Deno Edge tests
+    name: PostgreSQL 17 / Spring Flyway V22 / Deno Edge tests
     runs-on: ubuntu-latest
     timeout-minutes: 30
     services:
@@ -106,16 +106,18 @@ jobs:
               sys.exit(1)
           PY
 
-      - name: Verify Spring Flyway reached V20
+      - name: Verify Spring Flyway reached V22
         run: |
           latest="$(psql -X -v ON_ERROR_STOP=1 -h 127.0.0.1 -p 5432 -d airline_exam_bot_phase5_test -Atqc "SELECT COALESCE(MAX(version::int),0) FROM flyway_schema_history WHERE success")"
-          test "$latest" = "20"
+          test "$latest" = "22"
           echo "FLYWAY: V$latest"
 
       - name: Type-check PostgreSQL Edge integration files
         run: >-
           deno check
           supabase/functions/telegram-webhook/index.ts
+          supabase/functions/send-study-reminders/index.ts
+          supabase/functions/telegram-webhook/tests/study-reminder.postgres.test.ts
           supabase/functions/telegram-webhook/tests/practice.postgres.test.ts
           supabase/functions/telegram-webhook/tests/phase4.postgres.test.ts
           supabase/functions/telegram-webhook/tests/mock.postgres.test.ts
@@ -128,6 +130,7 @@ jobs:
           supabase/functions/telegram-webhook/tests/handler.test.mjs
           supabase/functions/telegram-webhook/tests/practice.test.mjs
           supabase/functions/telegram-webhook/tests/phase4.test.mjs
+          supabase/functions/send-study-reminders/tests/reminder-message.test.mjs
 
       - name: Run each Deno PostgreSQL file sequentially
         shell: bash
@@ -183,5 +186,12 @@ jobs:
           mock_tests="$(printf '%s\n' "$mock_result" | tail -n 1)"
           printf '%s\n' "$mock_result" | sed '$d'
 
-          total_tests=$((practice_tests + phase4_tests + mock_tests))
-          echo "DENO POSTGRESQL INTEGRATION: PASS files=3 tests=$total_tests failures=0"
+          if ! reminder_result="$(run_postgres_file 'STUDY REMINDER CAMPAIGN POSTGRES' 'supabase/functions/telegram-webhook/tests/study-reminder.postgres.test.ts')"; then
+            echo "STUDY REMINDER CAMPAIGN POSTGRES: FAIL"
+            exit 1
+          fi
+          reminder_tests="$(printf '%s\n' "$reminder_result" | tail -n 1)"
+          printf '%s\n' "$reminder_result" | sed '$d'
+
+          total_tests=$((practice_tests + phase4_tests + mock_tests + reminder_tests))
+          echo "DENO POSTGRESQL INTEGRATION: PASS files=4 tests=$total_tests failures=0"

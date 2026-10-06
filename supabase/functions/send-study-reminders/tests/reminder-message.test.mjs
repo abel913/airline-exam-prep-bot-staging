@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { buildReminder, INACTIVITY_MS, isReminderEligible, isValidSchedulerPayload } from "../reminder-message.mjs";
+import { buildReminder, campaignStatus, INACTIVITY_MS, isReminderEligible, isValidSchedulerPayload } from "../reminder-message.mjs";
 import { createStudyReminderFlow } from "../../telegram-webhook/study-reminder-flow.mjs";
 
 const base = (patch = {}) => ({
@@ -18,6 +18,15 @@ test("scheduler accepts an empty body or pg_net's default empty JSON object only
   assert.equal(isValidSchedulerPayload(" \n{} \n"), true);
   assert.equal(isValidSchedulerPayload('{"batch":1000}'), false);
   assert.equal(isValidSchedulerPayload("null"), false);
+});
+
+test("campaign status enforces OFF, scheduled, active, and expired windows", () => {
+  const now = Date.parse("2026-10-10T12:00:00Z");
+  assert.equal(campaignStatus({ enabled: false, startAt: "2026-10-10T00:00:00Z", endAt: "2026-10-11T00:00:00Z" }, now), "OFF");
+  assert.equal(campaignStatus({ enabled: true, startAt: "2026-10-10T13:00:00Z", endAt: "2026-10-11T00:00:00Z" }, now), "SCHEDULED");
+  assert.equal(campaignStatus({ enabled: true, startAt: "2026-10-10T00:00:00Z", endAt: "2026-10-11T00:00:00Z" }, now), "ACTIVE");
+  assert.equal(campaignStatus({ enabled: true, startAt: "2026-10-09T00:00:00Z", endAt: "2026-10-10T11:59:59Z" }, now), "EXPIRED");
+  assert.equal(campaignStatus({ enabled: true, startAt: null, endAt: null }, now), "OFF");
 });
 
 test("inactivity eligibility is strict at 8 hours and respects 8-hour successful-send throttle", () => {
@@ -67,9 +76,19 @@ test("payment waiting for proof gets continue/cancel; pending review falls back 
   assert.match(waiting.text, /waiting for payment confirmation/i);
   assert.ok(buttons.some((b) => b.callback_data === "pay:status"));
   assert.ok(buttons.some((b) => b.callback_data === "pay:cancel:81"));
-  const review = buildReminder(base({ has_practice: true, payment_request_id: null }));
-  assert.match(review.text, /Ready to continue/i);
+  const review = buildReminder(base({ has_practice: true, payment_request_id: null, payment_pending_review: true }));
+  assert.match(review.text, /while your upgrade request is being reviewed/i);
   assert.doesNotMatch(review.text, /waiting for payment confirmation/i);
+  assert.ok(review.reply_markup.inline_keyboard.flat().every((button) => !button.callback_data.startsWith("pay:")));
+  assert.equal(buildReminder(base({ payment_pending_review: true, practice_limit: 0, mock_limit: 0 })), null);
+});
+
+test("pending review never receives a payment action and skips users with no learning access", () => {
+  const review = buildReminder(base({ payment_request_id: "81", payment_pending_review: true, has_practice: false }));
+  const buttons = review.reply_markup.inline_keyboard.flat();
+  assert.match(review.text, /while your upgrade request is being reviewed/i);
+  assert.ok(buttons.every((button) => !button.callback_data.startsWith("pay:")));
+  assert.equal(buildReminder(base({ payment_pending_review: true, practice_limit: 0, practice_used: 0, mock_limit: 0, mocks_used: 0 })), null);
 });
 
 test("inactive exam routes to exam picker and Amharic messages/buttons are localized", () => {

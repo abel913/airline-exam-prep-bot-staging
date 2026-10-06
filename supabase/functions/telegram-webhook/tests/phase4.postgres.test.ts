@@ -10,7 +10,7 @@ import { createPaymentFlow } from "../payment-flow.mjs";
 // Intentionally accepts only a disposable local database. Never run these
 // fixture mutations against a hosted staging or production database.
 const databaseUrl = Deno.env.get("EDGE_TEST_DATABASE_URL") ?? "";
-const PHASE5_SCHEMA_VERSION = "21";
+const PHASE5_SCHEMA_VERSION = "22";
 const allowedDatabases = new Set(["airline_exam_bot_phase5_test", "airline_exam_bot_phase5_v20_fresh_test", "airline_exam_bot_phase5_v20_final_test", "airline_exam_bot_phase5_v21_test"]);
 const parsed = databaseUrl ? new URL(databaseUrl) : null;
 if (!parsed || !["postgres:", "postgresql:"].includes(parsed.protocol)

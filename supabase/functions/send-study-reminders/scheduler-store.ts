@@ -23,6 +23,7 @@ export type ReminderCandidate = {
   latest_mock_deadline_at: Date | string | null;
   has_practice: boolean;
   payment_request_id: string | bigint | null;
+  payment_pending_review: boolean;
 };
 
 export class PostgresStudyReminderSchedulerStore {
@@ -32,13 +33,16 @@ export class PostgresStudyReminderSchedulerStore {
     return await this.database.withConnection(async (client) => {
       await client.queryArray`BEGIN`;
       try {
-        const settings = (await client.queryObject<{ enabled: boolean; testTelegramId: string | bigint | null }>`
+        const settings = (await client.queryObject<{ enabled: boolean; startAt: Date | string | null; endAt: Date | string | null }>`
           SELECT study_reminders_globally_enabled AS enabled,
-                 study_reminders_test_telegram_user_id AS "testTelegramId"
+                 study_reminders_start_at AS "startAt",
+                 study_reminders_end_at AS "endAt"
           FROM app_settings WHERE id=1 FOR SHARE
         `).rows[0];
         if (!settings) throw new Error("REMINDER_SETTINGS_MISSING");
-        if (!settings.enabled && settings.testTelegramId === null) {
+        const now = Date.now();
+        if (!settings.enabled || settings.startAt === null || settings.endAt === null
+          || now < new Date(settings.startAt).getTime() || now > new Date(settings.endAt).getTime()) {
           await client.queryArray`COMMIT`;
           return [];
         }
@@ -49,7 +53,9 @@ export class PostgresStudyReminderSchedulerStore {
             JOIN access_entitlements ae ON ae.user_id=u.id AND ae.exam_type_id=u.selected_exam_type_id
             CROSS JOIN app_settings s
             WHERE s.id=1
-              AND (s.study_reminders_globally_enabled OR u.telegram_user_id=s.study_reminders_test_telegram_user_id)
+              AND s.study_reminders_globally_enabled=TRUE
+              AND s.study_reminders_start_at IS NOT NULL AND s.study_reminders_end_at IS NOT NULL
+              AND clock_timestamp() BETWEEN s.study_reminders_start_at AND s.study_reminders_end_at
               AND u.registration_status='COMPLETED' AND u.telegram_user_id IS NOT NULL
               AND u.telegram_user_id>0 AND u.selected_exam_type_id IS NOT NULL AND u.study_reminders_enabled=TRUE
               AND u.reminder_delivery_blocked_at IS NULL
@@ -87,7 +93,12 @@ export class PostgresStudyReminderSchedulerStore {
             ) AS has_practice,
             (SELECT p.id FROM payment_requests p WHERE p.open_user_id=c.id
               AND p.target_exam_type_id=c.selected_exam_type_id
-              AND p.status IN ('AWAITING_REFERENCE','AWAITING_RECEIPT') ORDER BY p.id DESC LIMIT 1) AS payment_request_id
+              AND p.status IN ('AWAITING_REFERENCE','AWAITING_RECEIPT')
+              AND NOT EXISTS (SELECT 1 FROM payment_requests review WHERE review.open_user_id=c.id
+                AND review.target_exam_type_id=c.selected_exam_type_id AND review.status='PENDING_REVIEW')
+              ORDER BY p.id DESC LIMIT 1) AS payment_request_id,
+            EXISTS(SELECT 1 FROM payment_requests p WHERE p.open_user_id=c.id
+              AND p.target_exam_type_id=c.selected_exam_type_id AND p.status='PENDING_REVIEW') AS payment_pending_review
           FROM claimed c
           JOIN exam_types e ON e.id=c.selected_exam_type_id
           JOIN access_entitlements ae ON ae.user_id=c.id AND ae.exam_type_id=c.selected_exam_type_id
@@ -109,20 +120,37 @@ export class PostgresStudyReminderSchedulerStore {
 
   async beginDelivery(userId: string, claimToken: string): Promise<boolean> {
     return await this.database.withConnection(async (client) => {
-      const result = await client.queryObject<{ eligible: boolean }>`
-        UPDATE bot_users u SET reminder_attempt_started_at=clock_timestamp()
-        FROM app_settings s
-        WHERE s.id=1 AND u.id=${userId} AND u.reminder_claim_token=${claimToken}::uuid
-          AND u.registration_status='COMPLETED' AND u.study_reminders_enabled=TRUE
-          AND u.reminder_delivery_blocked_at IS NULL
-          AND (s.study_reminders_globally_enabled OR u.telegram_user_id=s.study_reminders_test_telegram_user_id)
-          AND u.last_user_activity_at <= clock_timestamp()-INTERVAL '8 hours'
-          AND (u.last_reminder_sent_at IS NULL OR u.last_reminder_sent_at <= clock_timestamp()-INTERVAL '8 hours')
-          AND (u.reminder_attempt_started_at IS NULL OR u.reminder_attempt_started_at <= clock_timestamp()-INTERVAL '8 hours')
-          AND (u.reminder_retry_after IS NULL OR u.reminder_retry_after <= clock_timestamp())
-        RETURNING TRUE AS eligible
-      `;
-      return result.rows[0]?.eligible === true;
+      await client.queryArray`BEGIN`;
+      try {
+        const settings = (await client.queryObject<{ enabled: boolean; startAt: Date | string | null; endAt: Date | string | null }>`
+          SELECT study_reminders_globally_enabled AS enabled,
+                 study_reminders_start_at AS "startAt",
+                 study_reminders_end_at AS "endAt"
+          FROM app_settings WHERE id=1 FOR SHARE
+        `).rows[0];
+        const now = Date.now();
+        if (!settings || settings.enabled !== true || settings.startAt === null || settings.endAt === null
+          || now < new Date(settings.startAt).getTime() || now > new Date(settings.endAt).getTime()) {
+          await client.queryArray`COMMIT`;
+          return false;
+        }
+        const result = await client.queryObject<{ eligible: boolean }>`
+          UPDATE bot_users u SET reminder_attempt_started_at=clock_timestamp()
+          WHERE u.id=${userId} AND u.reminder_claim_token=${claimToken}::uuid
+            AND u.registration_status='COMPLETED' AND u.study_reminders_enabled=TRUE
+            AND u.reminder_delivery_blocked_at IS NULL
+            AND u.last_user_activity_at <= clock_timestamp()-INTERVAL '8 hours'
+            AND (u.last_reminder_sent_at IS NULL OR u.last_reminder_sent_at <= clock_timestamp()-INTERVAL '8 hours')
+            AND (u.reminder_attempt_started_at IS NULL OR u.reminder_attempt_started_at <= clock_timestamp()-INTERVAL '8 hours')
+            AND (u.reminder_retry_after IS NULL OR u.reminder_retry_after <= clock_timestamp())
+          RETURNING TRUE AS eligible
+        `;
+        await client.queryArray`COMMIT`;
+        return result.rows[0]?.eligible === true;
+      } catch (error) {
+        try { await client.queryArray`ROLLBACK`; } catch { /* preserve original error */ }
+        throw error;
+      }
     });
   }
 

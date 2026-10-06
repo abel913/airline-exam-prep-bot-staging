@@ -39,4 +39,19 @@ public class SettingsService {
         current.setMockDurationMinutes(form.mockDurationMinutes());
         changes.record(actor,"SETTINGS_UPDATED","settings:1",before,form.toString());
     }
+
+    @Transactional
+    public void updateStudyReminderCampaign(StudyReminderCampaignForm form, String actor) {
+        String error=form.validationError();
+        if(error!=null) throw new IllegalArgumentException(error);
+        AppSettings current=lock();
+        String before=current.isStudyRemindersGloballyEnabled()+"|"+current.getStudyRemindersStartAt()+"|"+current.getStudyRemindersEndAt();
+        current.setStudyRemindersGloballyEnabled(form.enabled());
+        current.setStudyRemindersStartAt(form.startInstant());
+        current.setStudyRemindersEndAt(form.endInstant());
+        current.setStudyRemindersUpdatedAt(java.time.Instant.now());
+        current.setStudyRemindersUpdatedBy(actor);
+        String after=form.enabled()+"|"+form.startInstant()+"|"+form.endInstant();
+        changes.record(actor,"STUDY_REMINDER_CAMPAIGN_UPDATED","settings:1",before,after);
+    }
 }

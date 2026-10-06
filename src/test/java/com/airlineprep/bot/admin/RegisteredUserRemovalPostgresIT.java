@@ -64,7 +64,7 @@ class RegisteredUserRemovalPostgresIT {
     @Test
     void removesOnlySelectedUsersCompleteHistoryAndAllowsSameIdentityToRegisterAgain() throws Exception {
         assertThat(jdbc.queryForObject("SELECT current_database()",String.class)).isIn(TEST_DATABASES);
-        assertThat(jdbc.queryForObject("SELECT version FROM flyway_schema_history WHERE success ORDER BY installed_rank DESC LIMIT 1",String.class)).isEqualTo("21");
+        assertThat(jdbc.queryForObject("SELECT version FROM flyway_schema_history WHERE success ORDER BY installed_rank DESC LIMIT 1",String.class)).isEqualTo("22");
         String suffix=UUID.randomUUID().toString().replace("-","").substring(0,12);
         settings.update(new SettingsForm(10,2,1,new BigDecimal("1.00"),"ETB",true,true,"synthetic integration",1),"phase5-remove-test");
         long examA=catalog.save(false,null,new CatalogForm("rm-a-"+suffix,"Synthetic Removal Exam A","",true,0,null),"phase5-remove-test");

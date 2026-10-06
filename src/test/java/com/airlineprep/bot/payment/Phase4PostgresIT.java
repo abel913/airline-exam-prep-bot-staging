@@ -83,7 +83,7 @@ class Phase4PostgresIT {
     @Test
     void phase4MockPaymentAndBothJavaFlywayMigrationsOnPostgreSQL() throws Exception {
         assertThat(jdbc.queryForObject("SELECT version()", String.class)).contains("PostgreSQL 18");
-        assertThat(jdbc.queryForObject("SELECT version FROM flyway_schema_history WHERE success ORDER BY installed_rank DESC LIMIT 1", String.class)).isEqualTo("21");
+        assertThat(jdbc.queryForObject("SELECT version FROM flyway_schema_history WHERE success ORDER BY installed_rank DESC LIMIT 1", String.class)).isEqualTo("22");
         assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM flyway_schema_history WHERE version IN ('16','17','18','19') AND success", Integer.class)).isEqualTo(4);
 
         var before = SettingsForm.from(settings.current());
@@ -198,7 +198,7 @@ class Phase4PostgresIT {
 
     @Test
     void phase5MultiExamUsagePaymentsContactsAndUniquenessOnPostgreSQL() throws Exception {
-        assertThat(jdbc.queryForObject("SELECT version FROM flyway_schema_history WHERE success ORDER BY installed_rank DESC LIMIT 1", String.class)).isEqualTo("21");
+        assertThat(jdbc.queryForObject("SELECT version FROM flyway_schema_history WHERE success ORDER BY installed_rank DESC LIMIT 1", String.class)).isEqualTo("22");
         var before=SettingsForm.from(settings.current());
         settings.update(new SettingsForm(10,2,3,new BigDecimal("50.00"),"ETB",true,true,"Synthetic staging support",1),"phase5-local-test");
         String suffix=UUID.randomUUID().toString().replace("-","").substring(0,12);
@@ -324,7 +324,7 @@ class Phase4PostgresIT {
                 }
             }
             Flyway latest=Flyway.configure().dataSource(url,username,password).schemas(schema).defaultSchema(schema).load();
-            assertThat(latest.migrate().targetSchemaVersion).isEqualTo("21");
+            assertThat(latest.migrate().targetSchemaVersion).isEqualTo("22");
             latest.validate();
             try(var c=DriverManager.getConnection(url,username,password)) {
                 c.setSchema(schema);

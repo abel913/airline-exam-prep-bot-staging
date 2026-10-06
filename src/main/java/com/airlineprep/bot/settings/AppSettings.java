@@ -32,6 +32,12 @@ public class AppSettings extends TimedEntity {
     private String supportInfo;
     @Column(length = 64)
     private String phoneKeyFingerprint;
+    private boolean studyRemindersGloballyEnabled;
+    private java.time.Instant studyRemindersStartAt;
+    private java.time.Instant studyRemindersEndAt;
+    private java.time.Instant studyRemindersUpdatedAt;
+    @Column(length = 120)
+    private String studyRemindersUpdatedBy;
     public Long getId() { return id; }
     public int getFreePracticeLimit() { return freePracticeLimit; }
     public void setFreePracticeLimit(int value) { freePracticeLimit = value; }
@@ -51,4 +57,14 @@ public class AppSettings extends TimedEntity {
     public void setSupportInfo(String value) { supportInfo = value; }
     public String getPhoneKeyFingerprint() { return phoneKeyFingerprint; }
     public void setPhoneKeyFingerprint(String value) { phoneKeyFingerprint = value; }
+    public boolean isStudyRemindersGloballyEnabled() { return studyRemindersGloballyEnabled; }
+    public void setStudyRemindersGloballyEnabled(boolean value) { studyRemindersGloballyEnabled=value; }
+    public java.time.Instant getStudyRemindersStartAt() { return studyRemindersStartAt; }
+    public void setStudyRemindersStartAt(java.time.Instant value) { studyRemindersStartAt=value; }
+    public java.time.Instant getStudyRemindersEndAt() { return studyRemindersEndAt; }
+    public void setStudyRemindersEndAt(java.time.Instant value) { studyRemindersEndAt=value; }
+    public java.time.Instant getStudyRemindersUpdatedAt() { return studyRemindersUpdatedAt; }
+    public void setStudyRemindersUpdatedAt(java.time.Instant value) { studyRemindersUpdatedAt=value; }
+    public String getStudyRemindersUpdatedBy() { return studyRemindersUpdatedBy; }
+    public void setStudyRemindersUpdatedBy(String value) { studyRemindersUpdatedBy=value; }
 }

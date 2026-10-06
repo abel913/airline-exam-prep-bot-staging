@@ -83,7 +83,7 @@ Deno.test("PostgreSQL: mock auto-next, server timer, expiry/restart and user+exa
   try {
     const latest = await database.withConnection(async (c) => (await c.queryObject<{ version: string }>`
       SELECT version FROM flyway_schema_history WHERE success=TRUE ORDER BY installed_rank DESC LIMIT 1`).rows[0]?.version);
-    assert.equal(latest, "21", "isolated database must be at V21");
+    assert.equal(latest, "22", "isolated database must be at V22");
     originalDuration = await database.withConnection(async (c) => (await c.queryObject<{ duration: number | null }>`
       SELECT mock_duration_minutes AS duration FROM app_settings WHERE id=1`).rows[0].duration);
     hasOriginalDuration = true;

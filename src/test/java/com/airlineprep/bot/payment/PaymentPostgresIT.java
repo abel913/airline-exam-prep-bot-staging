@@ -57,7 +57,7 @@ class PaymentPostgresIT {
   assertThat(queries.get(first).amount()).isEqualByComparingTo("50");
  }
  @Test void textProofPersistsWithoutReceiptAndReviewsOnlyItsTargetExam() {
-  assertThat(jdbc.queryForObject("SELECT version FROM flyway_schema_history WHERE success ORDER BY installed_rank DESC LIMIT 1",String.class)).isEqualTo("21");
+  assertThat(jdbc.queryForObject("SELECT version FROM flyway_schema_history WHERE success ORDER BY installed_rank DESC LIMIT 1",String.class)).isEqualTo("22");
   String suffix=UUID.randomUUID().toString();long sender=8000000000000L+Math.floorMod(suffix.hashCode(),1000000000);
   String codeSuffix=suffix.replace("-","").substring(0,12);
   long examA=catalog.save(false,null,new CatalogForm("proof-a-"+codeSuffix,"Synthetic Exam A","",true,0,null),"verification");

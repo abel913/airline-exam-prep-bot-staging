@@ -15,12 +15,12 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 class PracticeDeliveryMigrationTests {
     @Test
-    void migratesFreshSchemaAndV16UpgradeThroughPhase5V21() throws Exception {
+    void migratesFreshSchemaAndV16UpgradeThroughPhase5V22() throws Exception {
         String url = "jdbc:h2:mem:practice-v16-" + UUID.randomUUID() + ";DB_CLOSE_DELAY=-1;LOCK_TIMEOUT=10000";
         assertUpgrade(url, "sa");
         String freshUrl = "jdbc:h2:mem:practice-fresh-" + UUID.randomUUID() + ";DB_CLOSE_DELAY=-1;LOCK_TIMEOUT=10000";
         Flyway fresh = Flyway.configure().dataSource(freshUrl, "sa", "").load();
-        assertThat(fresh.migrate().targetSchemaVersion).isEqualTo("21");
+        assertThat(fresh.migrate().targetSchemaVersion).isEqualTo("22");
         try (var connection = DriverManager.getConnection(freshUrl, "sa", "")) {
             assertReceiptSchema(connection);
             assertPhase5Schema(connection);
@@ -51,7 +51,7 @@ class PracticeDeliveryMigrationTests {
             assertReceiptSchema(connection);
         }
         Flyway latest = Flyway.configure().dataSource(url, username, "").load();
-        assertThat(latest.migrate().targetSchemaVersion).isEqualTo("21");
+        assertThat(latest.migrate().targetSchemaVersion).isEqualTo("22");
         latest.validate();
         try (var connection = DriverManager.getConnection(url, username, "")) {
             assertReceiptSchema(connection);
@@ -112,6 +112,13 @@ class PracticeDeliveryMigrationTests {
             try (var columns=metadata.getColumns(null,schema,postgres?item[0]:item[0].toUpperCase(Locale.ROOT),
                     postgres?item[1]:item[1].toUpperCase(Locale.ROOT))) {
                 assertThat(columns.next()).as(item[0]+"."+item[1]).isTrue();
+            }
+        }
+        for (String column : java.util.List.of("study_reminders_start_at","study_reminders_end_at",
+                "study_reminders_updated_at","study_reminders_updated_by")) {
+            try (var columns=metadata.getColumns(null,schema,postgres?"app_settings":"APP_SETTINGS",
+                    postgres?column:column.toUpperCase(Locale.ROOT))) {
+                assertThat(columns.next()).as("app_settings."+column).isTrue();
             }
         }
         var uniqueIndexes=new java.util.LinkedHashMap<String,java.util.List<String>>();

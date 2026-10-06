@@ -1,0 +1,21 @@
+<!doctype html>
+<html lang="en" xmlns:th="http://www.thymeleaf.org">
+<head th:replace="~{admin/fragments :: head('Study Reminder Campaign')}"></head>
+<body><header th:replace="~{admin/fragments :: header}"></header><div class="shell">
+<nav th:replace="~{admin/fragments :: nav}"></nav><main>
+<p class="eyebrow">AUTOMATIC STUDY MESSAGES</p><h1>Study Reminder Campaign</h1>
+<p class="muted">Reminders are sent only to eligible users between the campaign start and end times. Times use <span th:text="${displayZone}">Africa/Addis_Ababa</span>; values are stored as UTC instants.</p>
+<p class="notice" th:if="${param.saved}" role="status">Campaign settings saved.</p>
+<p class="notice error" th:if="${error}" role="alert" th:text="${error}"></p>
+<section class="panel">
+<p>Status: <strong th:text="${campaignStatus}">OFF</strong></p>
+<p th:if="${updatedAt != null}" class="fine">Last changed <time th:text="${updatedAt}"></time><span th:if="${updatedBy != null}" th:text="| by ${updatedBy}|"></span></p>
+<form th:action="@{/admin/settings/study-reminders}" th:object="${campaignForm}" method="post">
+<label class="check"><input type="checkbox" th:field="*{enabled}"> Automatic Study Messages ON</label>
+<div class="form-grid">
+<div><label for="startAt">Start date and time (<span th:text="${displayZone}"></span>)</label><input id="startAt" type="datetime-local" th:field="*{startAt}" th:required="${campaignForm.enabled}"></div>
+<div><label for="endAt">End date and time (<span th:text="${displayZone}"></span>)</label><input id="endAt" type="datetime-local" th:field="*{endAt}" th:required="${campaignForm.enabled}"></div>
+</div>
+<p class="fine">Turning the campaign OFF stops future reminders immediately. Your dates remain saved for reuse.</p>
+<button class="primary" type="submit">Save Campaign Settings</button>
+</form></section></main></div></body></html>
