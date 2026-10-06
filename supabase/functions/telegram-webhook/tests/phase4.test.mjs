@@ -345,6 +345,7 @@ test("unsupported attachments and captions leave payment waiting and offer cance
   [{photo:[{file_id:"synthetic"}]} ,"photo"],
   [{document:{file_id:"synthetic",mime_type:"application/pdf",file_name:"proof.pdf"}},"PDF"],
   [{photo:[{file_id:"synthetic"}],caption:"FT123456789"},"caption"],
+  [{document:{file_id:"synthetic",mime_type:"application/pdf",file_name:"proof.pdf"},caption:"/start"},"command caption"],
   [{video:{file_id:"synthetic"}},"video"],
   [{animation:{file_id:"synthetic"}},"animation"],
   [{audio:{file_id:"synthetic"}},"audio"],

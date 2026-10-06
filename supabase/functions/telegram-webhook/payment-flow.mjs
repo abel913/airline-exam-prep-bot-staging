@@ -80,14 +80,15 @@ export function createPaymentFlow(service,telegram){
    try{
     const v=await service.status(tg);lang=v.student.language;const p=v.request;if(!p)return;
     const text=typeof m.text==="string"?m.text:"";
+    if((p.status==="AWAITING_REFERENCE"||p.status==="AWAITING_RECEIPT")&&hasAttachment(m)){
+      await send(telegram,chat,unsupportedFileView(lang,p.id));return;
+    }
     if(text.startsWith("/"))return;
     if(p.status==="AWAITING_REFERENCE"){
-      if(hasAttachment(m)){await send(telegram,chat,unsupportedFileView(lang,p.id));return;}
       if(typeof m.text!=="string"){await send(telegram,chat,unsupportedFileView(lang,p.id));return;}
       await send(telegram,chat,paymentView(await service.submitProof(tg,p.id,text)));return;
     }
     if(p.status==="AWAITING_RECEIPT"){
-      if(hasAttachment(m)){await send(telegram,chat,unsupportedFileView(lang,p.id));return;}
       if(typeof m.text==="string") {await send(telegram,chat,paymentView(await service.submitProof(tg,p.id,text)));return;}
       await send(telegram,chat,unsupportedFileView(lang,p.id));return;
     }
