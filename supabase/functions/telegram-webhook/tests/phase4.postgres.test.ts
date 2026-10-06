@@ -202,6 +202,36 @@ Deno.test("Phase 4 PostgreSQL: mocks and payments preserve transactional state",
     const fullProof = "Dear Customer,\nA debit transaction of ETB 50.00 occurred.\nhttps://provider.example/receipt?id=synthetic";
     const proofMessages: string[] = [];
     const proofFlow = createPaymentFlow(payment, { sendMessage: async (_chat: string, text: string) => { proofMessages.push(text); } } as never);
+    const waitingBeforeFile = await database.withConnection(async (c) => (await c.queryObject<{
+      status: string; payment_proof_text: string | null; receipt_file_id: string | null;
+    }>`SELECT status,payment_proof_text,receipt_file_id FROM payment_requests WHERE id=${otherRequest.request.id}`).rows[0]);
+    assert.equal(waitingBeforeFile.status, "AWAITING_REFERENCE");
+    assert.equal(waitingBeforeFile.payment_proof_text, null);
+    for (const [updateId, attachment] of [
+      ["phase4-photo-update", { photo: [{ file_id: "synthetic-photo", file_unique_id: "synthetic-photo-unique", width: 16, height: 16 }] }],
+      ["phase4-pdf-update", { document: { file_id: "synthetic-pdf", file_unique_id: "synthetic-pdf-unique", mime_type: "application/pdf", file_name: "proof.pdf" }, caption: "FT123456789" }],
+    ] as const) {
+      await proofFlow.message("synthetic-chat", tgLookup(otherId), attachment, updateId);
+      await proofFlow.message("synthetic-chat", tgLookup(otherId), attachment, updateId);
+    }
+    const afterUnsupportedFiles = await database.withConnection(async (c) => (await c.queryObject<{
+      status: string; payment_proof_text: string | null; receipt_file_id: string | null; receipt_unique_id: string | null;
+      notifications: bigint; audits: bigint; grants: bigint;
+    }>`SELECT p.status,p.payment_proof_text,p.receipt_file_id,p.receipt_unique_id,
+        (SELECT COUNT(*) FROM payment_notifications n WHERE n.request_id=p.id AND n.kind='ADMIN_PENDING') notifications,
+        (SELECT COUNT(*) FROM payment_audit_events a WHERE a.entity_type='PAYMENT' AND a.entity_id=p.id
+          AND a.action='PAYMENT_SUBMITTED_FOR_REVIEW') audits,
+        (SELECT COUNT(*) FROM lifetime_access_grants g WHERE g.user_id=p.user_id) grants
+      FROM payment_requests p WHERE p.id=${otherRequest.request.id}`).rows[0]);
+    assert.equal(afterUnsupportedFiles.status, "AWAITING_REFERENCE");
+    assert.equal(afterUnsupportedFiles.payment_proof_text, null);
+    assert.equal(afterUnsupportedFiles.receipt_file_id, null);
+    assert.equal(afterUnsupportedFiles.receipt_unique_id, null);
+    assert.equal(Number(afterUnsupportedFiles.notifications), 0);
+    assert.equal(Number(afterUnsupportedFiles.audits), 0);
+    assert.equal(Number(afterUnsupportedFiles.grants), 0);
+    assert.equal(proofMessages.filter((text) => text.includes("This file type is not supported for payment proof.")).length, 4,
+      "each rejected attachment receives clear feedback, with retries causing no database mutations");
     const proofUpdate = { text: fullProof };
     await proofFlow.message("synthetic-chat", tgLookup(otherId), proofUpdate, "phase4-proof-update-1");
     await proofFlow.message("synthetic-chat", tgLookup(otherId), proofUpdate, "phase4-proof-update-1");

@@ -339,14 +339,57 @@ test("Amharic pending confirmation promises review within 24 hours without promi
  assert.match(sent.at(-1)[1],/ማስረጃዎ ተቀምጧል/);
  assert.doesNotMatch(sent.at(-1)[1],/payment\.status\.PENDING_REVIEW/);
 });
-test("blank text is rejected and photo or document is not accepted while awaiting new proof",async()=>{
- for(const body of [{text:" \n \t"},{photo:[{file_id:"synthetic"}]},{document:{file_id:"synthetic"}}]){
+const UNSUPPORTED_FILE_EN="This file type is not supported for payment proof.\n\nPlease send either the full transaction confirmation message you received from the bank/payment provider, including the official receipt link, OR send only the transaction/reference number.";
+test("unsupported attachments and captions leave payment waiting and offer cancel/menu in both languages",async()=>{
+ for(const [body,label] of [
+  [{photo:[{file_id:"synthetic"}]} ,"photo"],
+  [{document:{file_id:"synthetic",mime_type:"application/pdf",file_name:"proof.pdf"}},"PDF"],
+  [{photo:[{file_id:"synthetic"}],caption:"FT123456789"},"caption"],
+  [{video:{file_id:"synthetic"}},"video"],
+  [{animation:{file_id:"synthetic"}},"animation"],
+  [{audio:{file_id:"synthetic"}},"audio"],
+  [{voice:{file_id:"synthetic"}},"voice"],
+  [{sticker:{file_id:"synthetic"}},"sticker"],
+  [{video_note:{file_id:"synthetic"}},"video note"],
+ ]){
   const f=paymentFixture(),{flow,sent,req}=await selectedPaymentFlow(f);
   await flow.message("10","tg",body,"synthetic-invalid-proof");
-  assert.equal(req.status,"AWAITING_REFERENCE");assert.equal(req.payment_proof_text,null);
-  assert.equal(req.receipt_file_id,null);assert.equal(f.state.notifications.length,0);assert.equal(f.state.audit.length,0);
-  assert.equal(sent.at(-1)[1],PROOF_GUIDANCE);
+  assert.equal(req.status,"AWAITING_REFERENCE",label);assert.equal(req.payment_proof_text,null,label);
+  assert.equal(req.receipt_file_id,null,label);assert.equal(f.state.requests.size,1,label);
+  assert.equal(f.state.notifications.length,0,label);assert.equal(f.state.audit.length,0,label);
+  assert.equal(sent.at(-1)[1],UNSUPPORTED_FILE_EN,label);
+  assert.deepEqual(sent.at(-1)[2].inline_keyboard.flat().map(b=>b.callback_data),[`pay:cancel:${req.id}`,"s:home"],label);
+  assert.deepEqual((await f.service.status("tg")).student.entitlements,{"1":"FREE","2":"FREE"},label);
+  await flow.message("10","tg",body,"synthetic-invalid-proof");
+  assert.equal(req.status,"AWAITING_REFERENCE",`${label} duplicate update`);
+  assert.equal(f.state.requests.size,1,`${label} duplicate update`);
  }
+ assert.equal(message("en","payment.unsupportedFile"),UNSUPPORTED_FILE_EN);
+ assert.match(message("am","payment.unsupportedFile"),/ለክፍያ ማስረጃ አይቀበልም/);
+ assert.match(message("am","payment.unsupportedFile"),/ኦፊሴላዊ የደረሰኝ አገናኙን/);
+ assert.notEqual(message("am","payment.unsupportedFile"),"payment.unsupportedFile");
+});
+test("attachment is rejected in the legacy waiting state; following reference text is accepted",async()=>{
+ const f=paymentFixture(),started=await f.service.start("tg","1","legacy-waiting"),id=started.request.id,sent=[];
+ await f.service.select("tg",id,"1");await f.service.reference("tg",id,"LEGACY-REF-001");
+ const req=f.state.requests.get(id);
+ const flow=createPaymentFlow(f.service,{async sendMessage(...args){sent.push(args);}});
+ await flow.message("10","tg",{document:{file_id:"synthetic",mime_type:"application/pdf",file_name:"proof.pdf"},caption:"LEGACY-REF-001"},"legacy-file");
+ assert.equal(req.status,"AWAITING_RECEIPT");assert.equal(req.receipt_file_id,null);assert.equal(req.payment_proof_text,null);
+ assert.equal(sent.at(-1)[1],UNSUPPORTED_FILE_EN);
+ await flow.message("10","tg",{text:"FT123456789"},"legacy-text");
+ assert.equal(req.status,"PENDING_REVIEW");assert.equal(req.payment_proof_text,"FT123456789");
+ assert.equal(req.receipt_file_id,null);assert.equal(f.state.requests.size,1);
+});
+test("unsupported file followed by reference-only text submits the same request",async()=>{
+ const f=paymentFixture(),{flow,sent,req}=await selectedPaymentFlow(f);
+ await flow.message("10","tg",{photo:[{file_id:"synthetic"}],caption:"FT123456789"},"photo-before-reference");
+ assert.equal(req.status,"AWAITING_REFERENCE");assert.equal(req.payment_proof_text,null);
+ await flow.message("10","tg",{text:"FT123456789"},"reference-after-photo");
+ assert.equal(req.status,"PENDING_REVIEW");assert.equal(req.payment_proof_text,"FT123456789");
+ assert.equal(req.receipt_file_id,null);assert.equal(f.state.requests.size,1);
+ assert.equal(f.state.notifications.length,1);assert.equal(f.state.audit.filter(e=>e.action==="PAYMENT_SUBMITTED_FOR_REVIEW").length,1);
+ assert.match(sent.at(-1)[1],/Pending manual review/);
 });
 test("payment start displays an active TELEBIRR method",async()=>{
  const f=paymentFixture({methods:[{id:"7",type:"TELEBIRR",display_name:"Telebirr",active:true,display_order:0}]});

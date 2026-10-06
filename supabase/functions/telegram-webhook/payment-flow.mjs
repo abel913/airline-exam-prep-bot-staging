@@ -6,12 +6,17 @@ function button(lang,key,data,fallback=key){
  if(new TextEncoder().encode(data).length>64)throw new Error("CALLBACK_DATA_TOO_LONG");return b;
 }
 const home=lang=>[[button(lang,"student.menu","s:home","Menu")]];
-function receiptFromMessage(m){
- const photo=Array.isArray(m?.photo)?m.photo:[];let file=null;
- for(const f of photo)if(!file||Number(f.width??0)*Number(f.height??0)>Number(file.width??0)*Number(file.height??0))file=f;
- if(file)return {fileId:file.file_id,uniqueId:file.file_unique_id,type:"PHOTO",filename:null,mime:"image/jpeg",size:Number(file.file_size??-1)};
- const d=m?.document;if(!d||typeof d!=="object")throw new PaymentError("payment.receiptInvalid");
- return {fileId:d.file_id,uniqueId:d.file_unique_id,type:"DOCUMENT",filename:d.file_name,mime:d.mime_type,size:Number(d.file_size??-1)};
+const attachmentFields=["photo","document","video","animation","audio","voice","sticker","video_note"];
+function hasAttachment(m){
+ return attachmentFields.some(key=>{
+  const value=m?.[key];
+  return key==="photo"?Array.isArray(value)&&value.length>0:value!==null&&typeof value==="object";
+ });
+}
+function unsupportedFileView(lang,requestId){
+ return {text:message(lang,"payment.unsupportedFile"),reply_markup:{inline_keyboard:[
+  [button(lang,"payment.cancel",`pay:cancel:${requestId}`)],...home(lang),
+ ]}};
 }
 function paymentView(v){
  const lang=v.student.language,p=v.request,rows=[];let text;
@@ -77,14 +82,14 @@ export function createPaymentFlow(service,telegram){
     const text=typeof m.text==="string"?m.text:"";
     if(text.startsWith("/"))return;
     if(p.status==="AWAITING_REFERENCE"){
-      if(typeof m.text!=="string"){await telegram.sendMessage(chat,message(lang,"payment.proofPrompt"),{inline_keyboard:home(lang)});return;}
+      if(hasAttachment(m)){await send(telegram,chat,unsupportedFileView(lang,p.id));return;}
+      if(typeof m.text!=="string"){await send(telegram,chat,unsupportedFileView(lang,p.id));return;}
       await send(telegram,chat,paymentView(await service.submitProof(tg,p.id,text)));return;
     }
     if(p.status==="AWAITING_RECEIPT"){
+      if(hasAttachment(m)){await send(telegram,chat,unsupportedFileView(lang,p.id));return;}
       if(typeof m.text==="string") {await send(telegram,chat,paymentView(await service.submitProof(tg,p.id,text)));return;}
-      if(m.forward_origin!==undefined||m.forward_date!==undefined||m.forward_from!==undefined||
-        m.forward_from_chat!==undefined||m.is_automatic_forward===true)throw new PaymentError("payment.receiptInvalid");
-      await send(telegram,chat,paymentView(await service.receipt(tg,p.id,receiptFromMessage(m))));return;
+      await send(telegram,chat,unsupportedFileView(lang,p.id));return;
     }
    }catch(e){if(!(e instanceof PaymentError))throw e;if(e.key==="student.register")return;
     await telegram.sendMessage(chat,message(lang,e.key),{inline_keyboard:home(lang)});}
