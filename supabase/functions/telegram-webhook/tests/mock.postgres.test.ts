@@ -241,13 +241,17 @@ Deno.test("PostgreSQL: mock auto-next, server timer, expiry/restart and user+exa
     assert.equal([...firstQuestionIds, ...secondIds, ...thirdIds].some((id) => fourthIds.includes(id)), false,
       "an abandoned READY mock also excludes every previously frozen question");
     assert.equal(await used(userA, examA), 2, "preparing an abandoned mock does not consume an attempt");
+    await expireInDatabase(fourth.attempt.id);
+    assert.equal((await mocks[0].open(telegramA, fourth.attempt.id, 0)).attempt.status, "EXPIRED",
+      "an unanswered abandoned mock can expire without removing its frozen questions from history");
+    assert.equal(await used(userA, examA), 2, "zero-answer expiry remains free");
     const beforeShortage = await database.withConnection(async (c) => Number((await c.queryObject<{ n: bigint }>`SELECT COUNT(*) AS n FROM mock_attempts WHERE user_id=${userA}`).rows[0].n));
     await assert.rejects(mocks[0].prepare(telegramA, "phase5-mock-shortage"), (e) => e instanceof MockError
       && e.key === "mock.insufficient" && e.args[0] === 1 && e.args[1] === 3);
     const afterShortage = await database.withConnection(async (c) => Number((await c.queryObject<{ n: bigint }>`SELECT COUNT(*) AS n FROM mock_attempts WHERE user_id=${userA}`).rows[0].n));
     assert.equal(afterShortage, beforeShortage, "insufficient pool creates no partial attempt");
     assert.equal(await database.withConnection(async (c) => Number((await c.queryObject<{ n: bigint }>`
-      SELECT COUNT(*) AS n FROM mock_attempts WHERE id IN (${second.attempt.id},${third.attempt.id}) AND status='EXPIRED'`).rows[0].n)), 2,
+      SELECT COUNT(*) AS n FROM mock_attempts WHERE id IN (${second.attempt.id},${third.attempt.id},${fourth.attempt.id}) AND status='EXPIRED'`).rows[0].n)), 3,
     "expired attempts remain in mock history");
 
     await database.transaction(async (c) => {
