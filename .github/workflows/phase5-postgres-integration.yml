@@ -115,9 +115,19 @@ jobs:
       - name: Type-check PostgreSQL Edge integration files
         run: >-
           deno check
+          supabase/functions/telegram-webhook/index.ts
           supabase/functions/telegram-webhook/tests/practice.postgres.test.ts
           supabase/functions/telegram-webhook/tests/phase4.postgres.test.ts
           supabase/functions/telegram-webhook/tests/mock.postgres.test.ts
+
+      - name: Run Edge unit tests and translation assertions
+        run: >-
+          deno test
+          supabase/functions/telegram-webhook/tests/domain.test.mjs
+          supabase/functions/telegram-webhook/tests/flow.test.mjs
+          supabase/functions/telegram-webhook/tests/handler.test.mjs
+          supabase/functions/telegram-webhook/tests/practice.test.mjs
+          supabase/functions/telegram-webhook/tests/phase4.test.mjs
 
       - name: Run each Deno PostgreSQL file sequentially
         shell: bash
