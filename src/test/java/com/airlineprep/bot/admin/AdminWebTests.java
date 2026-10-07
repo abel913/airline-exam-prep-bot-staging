@@ -157,6 +157,14 @@ class AdminWebTests extends IsolatedDatabaseSupport {
             .isInstanceOf(jakarta.validation.ConstraintViolationException.class);
     }
     @Test void studyReminderCampaignIsAdminOnlyValidatedAuditedAndShowsAllStatuses() throws Exception {
+        var now=java.time.LocalDateTime.now(com.airlineprep.bot.settings.StudyReminderCampaignForm.DISPLAY_ZONE)
+            .withSecond(0).withNano(0);
+        var activeStart=now.minusHours(1).toString();
+        var activeEnd=now.plusHours(1).toString();
+        var scheduledStart=now.plusDays(1).toString();
+        var scheduledEnd=now.plusDays(2).toString();
+        var expiredStart=now.minusDays(3).toString();
+        var expiredEnd=now.minusDays(2).toString();
         mvc.perform(get("/admin/settings/study-reminders").with(user("ordinary").roles("USER")))
             .andExpect(status().isForbidden());
         mvc.perform(post("/admin/settings/study-reminders").with(csrf()).with(user("ordinary").roles("USER"))
@@ -170,7 +178,7 @@ class AdminWebTests extends IsolatedDatabaseSupport {
         assertThat(settings.current().isStudyRemindersGloballyEnabled()).isFalse();
 
         mvc.perform(post("/admin/settings/study-reminders").with(csrf()).with(user("test-admin").roles("ADMIN"))
-            .param("enabled","true").param("startAt","2026-10-05T00:00").param("endAt","2026-10-07T00:00"))
+            .param("enabled","true").param("startAt",activeStart).param("endAt",activeEnd))
             .andExpect(status().is3xxRedirection());
         assertThat(settings.current().isStudyRemindersGloballyEnabled()).isTrue();
         assertThat(settings.current().getStudyRemindersUpdatedBy()).isEqualTo("test-admin");
@@ -179,13 +187,13 @@ class AdminWebTests extends IsolatedDatabaseSupport {
         mvc.perform(get("/admin/settings/study-reminders").with(user("test-admin").roles("ADMIN")))
             .andExpect(status().isOk()).andExpect(model().attribute("campaignStatus","ACTIVE"));
 
-        settings.updateStudyReminderCampaign(new StudyReminderCampaignForm(true,"2026-10-07T00:00","2026-10-08T00:00"),"test-admin");
+        settings.updateStudyReminderCampaign(new StudyReminderCampaignForm(true,scheduledStart,scheduledEnd),"test-admin");
         mvc.perform(get("/admin/settings/study-reminders").with(user("test-admin").roles("ADMIN")))
             .andExpect(model().attribute("campaignStatus","SCHEDULED"));
-        settings.updateStudyReminderCampaign(new StudyReminderCampaignForm(true,"2026-10-01T00:00","2026-10-05T00:00"),"test-admin");
+        settings.updateStudyReminderCampaign(new StudyReminderCampaignForm(true,expiredStart,expiredEnd),"test-admin");
         mvc.perform(get("/admin/settings/study-reminders").with(user("test-admin").roles("ADMIN")))
             .andExpect(model().attribute("campaignStatus","EXPIRED"));
-        settings.updateStudyReminderCampaign(new StudyReminderCampaignForm(false,"2026-10-01T00:00","2026-10-05T00:00"),"test-admin");
+        settings.updateStudyReminderCampaign(new StudyReminderCampaignForm(false,expiredStart,expiredEnd),"test-admin");
         assertThat(settings.current().getStudyRemindersStartAt()).isNotNull();
         assertThat(settings.current().isStudyRemindersGloballyEnabled()).isFalse();
     }
