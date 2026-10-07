@@ -41,12 +41,21 @@ public class QuestionController {
   m.addAttribute("text",text);m.addAttribute("exam",exam);m.addAttribute("category",category);m.addAttribute("status",status);m.addAttribute("pool",pool);m.addAttribute("useStatus",rights);m.addAttribute("sort",sort);
   return "admin/question-list";
  }
- @GetMapping("/bulk-delete-drafts")
+ @GetMapping("/bulk-delete-non-published")
  String bulkDeleteConfirm(Model m) { m.addAttribute("plan",bulkDelete.preview());return "admin/question-bulk-delete-confirm"; }
- @PostMapping("/bulk-delete-drafts")
- String bulkDelete(@RequestParam(defaultValue="false") boolean confirm,Principal actor,Model m,RedirectAttributes flash) {
-  if(!confirm) { flash.addFlashAttribute("error","Confirm bulk draft deletion before continuing.");return "redirect:/admin/questions/bulk-delete-drafts"; }
-  m.addAttribute("result",bulkDelete.deleteAll(actor.getName()));return "admin/question-bulk-delete-result";
+ @PostMapping("/bulk-delete-non-published")
+ String bulkDelete(@RequestParam(defaultValue="") String confirmation,Principal actor,Model m,RedirectAttributes flash) {
+  var plan=bulkDelete.preview();
+  String expected="DELETE "+plan.eligible()+" NON-PUBLISHED QUESTIONS";
+  if(!confirmation.equals(expected)) {
+   flash.addFlashAttribute("error","Type the exact confirmation phrase shown below to continue.");
+   return "redirect:/admin/questions/bulk-delete-non-published";
+  }
+  try { m.addAttribute("result",bulkDelete.deleteAll(actor.getName(),plan.eligible()));return "admin/question-bulk-delete-result"; }
+  catch(IllegalArgumentException e) {
+   flash.addFlashAttribute("error",e.getMessage());
+   return "redirect:/admin/questions/bulk-delete-non-published";
+  }
  }
  @GetMapping("/new")
  String create(Model m) { m.addAttribute("form",new QuestionForm());m.addAttribute("action","/admin/questions/new");choices(m);return "admin/question-form"; }

@@ -360,33 +360,36 @@ class QuestionBankTests extends IsolatedDatabaseSupport {
   assertThatThrownBy(()->questions.deleteSafeDraft(published,questions.get(published).revision,"test-admin"))
    .hasMessageContaining("Archive it instead");
  }
- @Test void bulkDeleteRemovesSeveralSafeDraftsAndIsRepeatSafe() {
-  long a=create(),b=questions.save(null,form("Fictional second safe bulk draft"),"test-admin");
-  var plan=bulkDelete.preview();assertThat(plan.drafts()).isEqualTo(2);assertThat(plan.eligible()).isEqualTo(2);
-  var result=bulkDelete.deleteAll("test-admin");
-  assertThat(result.draftsFound()).isEqualTo(2);assertThat(result.deleted()).isEqualTo(2);
+ @Test void bulkDeleteRemovesNeverPublishedDraftReviewedAndArchivedButPreservesPublished() {
+  long draft=create(),reviewed=create(),archived=create(),published=create();
+  transition(reviewed,QuestionStatus.REVIEWED);transition(archived,QuestionStatus.ARCHIVED);publish(published);
+  em.flush();em.clear();
+  var plan=bulkDelete.preview();assertThat(plan.nonPublished()).isEqualTo(3);assertThat(plan.eligible()).isEqualTo(3);
+  var result=bulkDelete.deleteAll("test-admin",plan.eligible());
+  assertThat(result.found()).isEqualTo(3);assertThat(result.deleted()).isEqualTo(3);
   assertThat(result.skipped()).isZero();assertThat(result.failed()).isZero();
-  assertThat(repository.findById(a)).isEmpty();assertThat(repository.findById(b)).isEmpty();
-  assertThat(changes.findAll()).extracting(c->c.getAction()).contains("BULK_DRAFTS_DELETED");
-  var repeated=bulkDelete.deleteAll("test-admin");assertThat(repeated.draftsFound()).isZero();assertThat(repeated.deleted()).isZero();
+  assertThat(repository.findById(draft)).isEmpty();assertThat(repository.findById(reviewed)).isEmpty();assertThat(repository.findById(archived)).isEmpty();
+  assertThat(repository.findById(published)).isPresent().get().extracting(q->q.status).isEqualTo(QuestionStatus.PUBLISHED);
+  assertThat(changes.findAll()).extracting(c->c.getAction()).contains("BULK_NON_PUBLISHED_QUESTIONS_DELETED");
+  var repeated=bulkDelete.deleteAll("test-admin",0);assertThat(repeated.found()).isZero();assertThat(repeated.deleted()).isZero();
  }
- @Test void bulkDelete101DraftsUsesBoundedKeysetBatches() {
-  for(int i=0;i<101;i++) questions.save(null,form("Fictional bulk cleanup draft "+i),"test-admin");
-  var result=bulkDelete.deleteAll("test-admin");
-  assertThat(result.draftsFound()).isEqualTo(101);assertThat(result.deleted()).isEqualTo(101);
+ @Test void bulkDelete101NonPublishedQuestionsUsesBoundedKeysetBatches() {
+  for(int i=0;i<101;i++) questions.save(null,form("Fictional bulk cleanup question "+i),"test-admin");
+  var result=bulkDelete.deleteAll("test-admin",101);
+  assertThat(result.found()).isEqualTo(101);assertThat(result.deleted()).isEqualTo(101);
   assertThat(repository.count()).isZero();
  }
- @Test void bulkDeleteSkipsPreviouslyPublishedAndOtherLifecycleStatuses() {
-  long oldPublished=create();publish(oldPublished);var revision=questions.form(oldPublished);revision.questionText="Fictional edited after publication";questions.save(oldPublished,revision,"test-admin");
+ @Test void bulkDeletePreservesPreviouslyPublishedHistoryAndDeletesOtherNonPublishedStates() {
+  long oldPublished=create();publish(oldPublished);var revision=questions.form(oldPublished);revision.questionText="Fictional edited after publication";questions.save(oldPublished,revision,"test-admin");transition(oldPublished,QuestionStatus.ARCHIVED);
   long published=create();publish(published);
   long reviewed=create();transition(reviewed,QuestionStatus.REVIEWED);
   long archived=create();transition(archived,QuestionStatus.ARCHIVED);
-  var plan=bulkDelete.preview();assertThat(plan.drafts()).isEqualTo(1);assertThat(plan.eligible()).isZero();
-  var result=bulkDelete.deleteAll("test-admin");assertThat(result.deleted()).isZero();assertThat(result.skipped()).isEqualTo(1);
+  var plan=bulkDelete.preview();assertThat(plan.nonPublished()).isEqualTo(3);assertThat(plan.eligible()).isEqualTo(2);
+  var result=bulkDelete.deleteAll("test-admin",2);assertThat(result.deleted()).isEqualTo(2);assertThat(result.skipped()).isEqualTo(1);
   assertThat(result.issues()).anyMatch(i->i.questionId()==oldPublished&&i.reason().contains("Previously published"));
-  assertThat(repository.findById(reviewed)).isPresent();assertThat(repository.findById(archived)).isPresent();
+  assertThat(repository.findById(reviewed)).isEmpty();assertThat(repository.findById(archived)).isEmpty();
   assertThat(questions.get(published).status).isEqualTo(QuestionStatus.PUBLISHED);
-  assertThat(questions.get(oldPublished).status).isEqualTo(QuestionStatus.DRAFT);
+  assertThat(questions.get(oldPublished).status).isEqualTo(QuestionStatus.ARCHIVED);
  }
  @Test void bulkDeleteSkipsPracticeMockAndImportLinkedDrafts() throws Exception {
   long practice=create();var p=questions.get(practice);long user=unusedStudentId();
@@ -396,7 +399,7 @@ class QuestionBankTests extends IsolatedDatabaseSupport {
   jdbc.update("INSERT INTO mock_items(attempt_id,sequence_number,question_id,version_id) VALUES (?,0,?,?)",attempt,mock,m.currentVersion.id);
   long batch=stage(List.of(values("Fictional imported protected draft")));imports.confirm(batch,"test-admin");
   long imported=rows.findByBatchIdOrderByRowNumber(batch).getFirst().questionId;
-  var result=bulkDelete.deleteAll("test-admin");assertThat(result.deleted()).isZero();assertThat(result.skipped()).isEqualTo(3);
+  var result=bulkDelete.deleteAll("test-admin",0);assertThat(result.deleted()).isZero();assertThat(result.skipped()).isEqualTo(3);
   assertThat(result.issues()).anyMatch(i->i.questionId()==practice&&i.reason().contains("practice"));
   assertThat(result.issues()).anyMatch(i->i.questionId()==mock&&i.reason().contains("mock"));
   assertThat(result.issues()).anyMatch(i->i.questionId()==imported&&i.reason().contains("import/history"));
@@ -458,12 +461,12 @@ class QuestionBankTests extends IsolatedDatabaseSupport {
  @Test void corruptXlsxRejected() {
   assertThatThrownBy(()->parser.parse(new MockMultipartFile("file","test.xlsx","application/octet-stream",new byte[]{'P','K',1,2}))).isInstanceOf(IllegalArgumentException.class);
  }
- @ParameterizedTest @ValueSource(strings={"/admin/questions","/admin/questions/new","/admin/questions/bulk-delete-drafts","/admin/questions/new","/admin/questions/1","/admin/questions/1/edit","/admin/questions/import","/admin/questions/import/1","/admin/questions/import/1/remove-questions","/admin/questions/import/template.csv"})
+ @ParameterizedTest @ValueSource(strings={"/admin/questions","/admin/questions/new","/admin/questions/bulk-delete-non-published","/admin/questions/new","/admin/questions/1","/admin/questions/1/edit","/admin/questions/import","/admin/questions/import/1","/admin/questions/import/1/remove-questions","/admin/questions/import/template.csv"})
  void allReadsRequireAdmin(String path) throws Exception {
   mvc.perform(get(path)).andExpect(status().is3xxRedirection());
   mvc.perform(get(path).with(user("ordinary").roles("USER"))).andExpect(status().isForbidden());
  }
- @ParameterizedTest @ValueSource(strings={"/admin/questions/new","/admin/questions/1/edit","/admin/questions/1/transition","/admin/questions/1/restore","/admin/questions/1/delete","/admin/questions/bulk-delete-drafts","/admin/questions/import/1/confirm","/admin/questions/import/1/cancel","/admin/questions/import/1/review-publish","/admin/questions/import/1/delete","/admin/questions/import/1/clear-invalid","/admin/questions/import/1/remove-questions","/admin/questions/import/clear-cancelled-failed"})
+ @ParameterizedTest @ValueSource(strings={"/admin/questions/new","/admin/questions/1/edit","/admin/questions/1/transition","/admin/questions/1/restore","/admin/questions/1/delete","/admin/questions/bulk-delete-non-published","/admin/questions/import/1/confirm","/admin/questions/import/1/cancel","/admin/questions/import/1/review-publish","/admin/questions/import/1/delete","/admin/questions/import/1/clear-invalid","/admin/questions/import/1/remove-questions","/admin/questions/import/clear-cancelled-failed"})
  void mutationsRequireCsrfAndAdmin(String path) throws Exception {
   mvc.perform(post(path).with(user("admin").roles("ADMIN"))).andExpect(status().isForbidden());
   mvc.perform(post(path).with(csrf())).andExpect(status().is3xxRedirection());
@@ -471,25 +474,38 @@ class QuestionBankTests extends IsolatedDatabaseSupport {
  }
  @Test void viewsRenderAndEscapeContent() throws Exception {
   var f=form("<script>alert('fictional')</script>");long id=questions.save(null,f,"test-admin");
-  for(String path:List.of("/admin/questions","/admin/questions/new","/admin/questions/bulk-delete-drafts","/admin/questions/"+id,"/admin/questions/"+id+"/edit","/admin/questions/import","/admin")) {
+  for(String path:List.of("/admin/questions","/admin/questions/new","/admin/questions/bulk-delete-non-published","/admin/questions/"+id,"/admin/questions/"+id+"/edit","/admin/questions/import","/admin")) {
    mvc.perform(get(path).with(user("admin").roles("ADMIN"))).andExpect(status().isOk());
   }
   mvc.perform(get("/admin/questions/"+id).with(user("admin").roles("ADMIN"))).andExpect(content().string(org.hamcrest.Matchers.containsString("&lt;script&gt;")));
   long batch=stage(List.of(values("Fictional preview")));
   mvc.perform(get("/admin/questions/import/"+batch).with(user("admin").roles("ADMIN"))).andExpect(status().isOk());
  }
- @Test void bulkDeleteConfirmationAndAdminPostWork() throws Exception {
-  long id=create();long protectedId=create();publish(protectedId);var f=questions.form(protectedId);f.questionText="Fictional protected published revision";questions.save(protectedId,f,"test-admin");
-  mvc.perform(get("/admin/questions/bulk-delete-drafts").with(user("admin").roles("ADMIN")))
-   .andExpect(status().isOk()).andExpect(content().string(org.hamcrest.Matchers.containsString("Total DRAFT questions: 2")))
-   .andExpect(content().string(org.hamcrest.Matchers.containsString("Eligible for permanent deletion: 1")));
-  mvc.perform(post("/admin/questions/bulk-delete-drafts").with(user("admin").roles("ADMIN")).with(csrf()))
-   .andExpect(status().is3xxRedirection());assertThat(repository.findById(id)).isPresent();
-  mvc.perform(post("/admin/questions/bulk-delete-drafts").with(user("admin").roles("ADMIN")).with(csrf()).param("confirm","true"))
+ @Test void bulkDeleteConfirmationAndAdminPostOnlyDeleteEligibleNonPublishedQuestions() throws Exception {
+  long draft=create(),reviewed=create(),published=create();transition(reviewed,QuestionStatus.REVIEWED);publish(published);em.flush();em.clear();
+  mvc.perform(get("/admin/questions").with(user("admin").roles("ADMIN")))
+   .andExpect(status().isOk()).andExpect(content().string(org.hamcrest.Matchers.containsString("Delete All Non-Published Questions")));
+  mvc.perform(get("/admin/questions/bulk-delete-non-published").with(user("admin").roles("ADMIN")))
+   .andExpect(status().isOk()).andExpect(content().string(org.hamcrest.Matchers.containsString("Total non-published questions: 2")))
+   .andExpect(content().string(org.hamcrest.Matchers.containsString("Eligible for permanent deletion: 2")))
+   .andExpect(content().string(org.hamcrest.Matchers.containsString("Published questions will NOT be deleted")));
+  mvc.perform(post("/admin/questions/bulk-delete-non-published").with(user("admin").roles("ADMIN")).with(csrf()))
+   .andExpect(status().is3xxRedirection());assertThat(repository.findById(draft)).isPresent();
+  mvc.perform(post("/admin/questions/bulk-delete-non-published").with(user("admin").roles("ADMIN")).with(csrf()).param("confirmation","DELETE 2 NON-PUBLISHED QUESTIONS"))
    .andExpect(status().isOk()).andExpect(view().name("admin/question-bulk-delete-result"))
-   .andExpect(content().string(org.hamcrest.Matchers.containsString("Drafts found: 2 · Deleted: 1 · Skipped: 1 · Failed: 0")))
-   .andExpect(content().string(org.hamcrest.Matchers.containsString("Previously published")));
-  assertThat(repository.findById(id)).isEmpty();assertThat(repository.findById(protectedId)).isPresent();
+   .andExpect(content().string(org.hamcrest.Matchers.containsString("Non-published questions found: 2 · Deleted: 2 · Skipped: 0 · Failed: 0")))
+   .andExpect(content().string(org.hamcrest.Matchers.containsString("Published questions were preserved")));
+  assertThat(repository.findById(draft)).isEmpty();assertThat(repository.findById(reviewed)).isEmpty();
+  assertThat(repository.findById(published)).isPresent().get().extracting(q->q.status).isEqualTo(QuestionStatus.PUBLISHED);
+ }
+ @Test void nonPublishedBulkDeleteDoesNothingWhenNoEligibleRecordsAndRejectsWrongCountPhrase() throws Exception {
+  long published=create();publish(published);em.flush();em.clear();
+  mvc.perform(get("/admin/questions/bulk-delete-non-published").with(user("admin").roles("ADMIN")))
+   .andExpect(status().isOk()).andExpect(content().string(org.hamcrest.Matchers.containsString("No eligible non-published questions were found")));
+  mvc.perform(post("/admin/questions/bulk-delete-non-published").with(user("admin").roles("ADMIN")).with(csrf())
+   .param("confirmation","DELETE 1 NON-PUBLISHED QUESTIONS"))
+   .andExpect(status().is3xxRedirection());
+  assertThat(repository.findById(published)).isPresent();
  }
  @Test void controllerDraftValidationAndUploadFlow() throws Exception {
   mvc.perform(post("/admin/questions/new").with(user("admin").roles("ADMIN")).with(csrf())

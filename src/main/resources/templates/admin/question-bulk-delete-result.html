@@ -1,9 +1,10 @@
 <!doctype html>
 <html lang="en" xmlns:th="http://www.thymeleaf.org">
-<head th:replace="~{admin/fragments :: head('Draft deletion result')}"></head>
+<head th:replace="~{admin/fragments :: head('Non-published question deletion result')}"></head>
 <body><header th:replace="~{admin/fragments :: header}"></header><div class="shell"><nav th:replace="~{admin/fragments :: nav}"></nav><main>
-<h1>Draft deletion result</h1>
-<p th:text="${'Drafts found: '+result.draftsFound()+' · Deleted: '+result.deleted()+' · Skipped: '+result.skipped()+' · Failed: '+result.failed()}"></p>
+<h1>Non-published question deletion result</h1>
+<p th:text="${'Non-published questions found: '+result.found()+' · Deleted: '+result.deleted()+' · Skipped: '+result.skipped()+' · Failed: '+result.failed()}"></p>
+<p>Published questions were preserved.</p>
 <section class="panel" th:if="${!result.issues().isEmpty()}"><h2>Skipped and failed questions</h2><ul><li th:each="issue : ${result.issues()}" th:text="${'Q'+issue.questionId()+' — '+#strings.abbreviate(issue.preview(),120)+' — '+issue.reason()+' ('+issue.kind()+')'}"></li></ul></section>
 <p><a th:href="@{/admin/questions}">Return to Questions</a></p>
 </main></div></body></html>

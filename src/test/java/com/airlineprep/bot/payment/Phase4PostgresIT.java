@@ -18,6 +18,7 @@ import com.airlineprep.bot.mock.MockAttemptService;
 import com.airlineprep.bot.question.Difficulty;
 import com.airlineprep.bot.question.QuestionForm;
 import com.airlineprep.bot.question.QuestionService;
+import com.airlineprep.bot.question.QuestionBulkDeleteService;
 import com.airlineprep.bot.question.QuestionStatus;
 import com.airlineprep.bot.question.UseStatus;
 import com.airlineprep.bot.settings.SettingsForm;
@@ -79,6 +80,7 @@ class Phase4PostgresIT {
     @Autowired com.airlineprep.bot.user.RegistrationService registration;
     @Autowired JdbcTemplate jdbc;
     @Autowired com.airlineprep.bot.practice.PracticeService practice;
+    @Autowired QuestionBulkDeleteService bulkDelete;
 
     @Test
     void phase4MockPaymentAndBothJavaFlywayMigrationsOnPostgreSQL() throws Exception {
@@ -194,6 +196,44 @@ class Phase4PostgresIT {
         assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM lifetime_access_grants WHERE user_id=?", Integer.class, otherUserId)).isZero();
 
         assertThat(before).isNotNull(); // @Transactional rolls all synthetic data and settings back after the test.
+    }
+
+    @Test
+    void nonPublishedQuestionCleanupOnPostgreSQLDeletesOnlySafeUnpublishedRows() {
+        long exam = catalog.save(false, null, new CatalogForm("phase4test",
+            "Synthetic Phase 4 Exam", "", true, 0, null), "phase4-local-test");
+        long category = catalog.save(true, null,
+            new CatalogForm("mock-a", "Synthetic Category A", "", true, 0, exam), "phase4-local-test");
+
+        long draft = questions.save(null, syntheticQuestion(exam, category, "Synthetic cleanup draft", false), "phase4-local-test");
+        long reviewed = questions.save(null, syntheticQuestion(exam, category, "Synthetic cleanup reviewed", false), "phase4-local-test");
+        questions.transition(reviewed, QuestionStatus.REVIEWED, questions.get(reviewed).getRevision(), "phase4-local-test");
+        long archived = questions.save(null, syntheticQuestion(exam, category, "Synthetic cleanup archived", false), "phase4-local-test");
+        questions.transition(archived, QuestionStatus.ARCHIVED, questions.get(archived).getRevision(), "phase4-local-test");
+        long published = questions.save(null, syntheticQuestion(exam, category, "Synthetic cleanup published", false), "phase4-local-test");
+        questions.transition(published, QuestionStatus.REVIEWED, questions.get(published).getRevision(), "phase4-local-test");
+        questions.transition(published, QuestionStatus.PUBLISHED, questions.get(published).getRevision(), "phase4-local-test");
+        long formerlyPublished = questions.save(null, syntheticQuestion(exam, category, "Synthetic cleanup history", false), "phase4-local-test");
+        questions.transition(formerlyPublished, QuestionStatus.REVIEWED, questions.get(formerlyPublished).getRevision(), "phase4-local-test");
+        questions.transition(formerlyPublished, QuestionStatus.PUBLISHED, questions.get(formerlyPublished).getRevision(), "phase4-local-test");
+        questions.transition(formerlyPublished, QuestionStatus.ARCHIVED, questions.get(formerlyPublished).getRevision(), "phase4-local-test");
+
+        var plan = bulkDelete.preview();
+        assertThat(plan.nonPublished()).isEqualTo(4);
+        assertThat(plan.eligible()).isEqualTo(3);
+        assertThat(plan.protectedCount()).isEqualTo(1);
+
+        var result = bulkDelete.deleteAll("phase4-local-test", plan.eligible());
+
+        assertThat(result.found()).isEqualTo(4);
+        assertThat(result.deleted()).isEqualTo(3);
+        assertThat(result.skipped()).isEqualTo(1);
+        assertThat(result.issues()).anyMatch(issue -> issue.questionId() == formerlyPublished
+            && issue.reason().contains("Previously published"));
+        assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM questions WHERE id IN (?, ?, ?)", Integer.class,
+            draft, reviewed, archived)).isZero();
+        assertThat(jdbc.queryForObject("SELECT status FROM questions WHERE id=?", String.class, published)).isEqualTo("PUBLISHED");
+        assertThat(jdbc.queryForObject("SELECT status FROM questions WHERE id=?", String.class, formerlyPublished)).isEqualTo("ARCHIVED");
     }
 
     @Test

@@ -7,8 +7,8 @@ public class QuestionBulkDeleteAudit {
  private final AdminChangeService changes;
  public QuestionBulkDeleteAudit(AdminChangeService changes) { this.changes=changes; }
  @Transactional
- public void record(String actor,int found,int deleted,int skipped,int failed) {
-  changes.record(actor,"BULK_DRAFTS_DELETED","questions","found:"+found,
+ public void record(String actor,long found,long deleted,long skipped,long failed) {
+  changes.record(actor,"BULK_NON_PUBLISHED_QUESTIONS_DELETED","questions","found:"+found,
    "deleted:"+deleted+", skipped:"+skipped+", failed:"+failed);
  }
 }

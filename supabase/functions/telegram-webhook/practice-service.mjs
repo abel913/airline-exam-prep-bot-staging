@@ -32,6 +32,8 @@ export class PracticeService {
       });
     } catch (error) {
       if (error instanceof Error && error.message === "STUDENT_INVALID") throw new PracticeError("student.invalid");
+      if (error instanceof Error && error.message === "CATEGORY_UPGRADE") throw new PracticeError("category.upgrade");
+      if (error instanceof Error && error.message === "PRACTICE_EMPTY") throw new PracticeError("practice.empty");
       throw error;
     }
   }

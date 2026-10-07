@@ -40,6 +40,8 @@ async function fixture(limitValue = 3) {
       VALUES(${examId},${code},${`Synthetic ${code}`},'',TRUE,0,CURRENT_TIMESTAMP,CURRENT_TIMESTAMP) RETURNING id`;
     const categoryId = await category("numbers");
     const premiumCategoryId = await category("premium");
+    const inactiveCategoryId = await category("inactive");
+    await client.queryArray`UPDATE categories SET active=FALSE WHERE id=${inactiveCategoryId}`;
     const user = async (telegramId: string) => {
       const hash = fakeHash();
       const userId = await queryId`INSERT INTO bot_users(telegram_user_id,preferred_language,selected_exam_type_id,registration_status,
@@ -50,7 +52,7 @@ async function fixture(limitValue = 3) {
         VALUES(${userId},${examId},${hash},'FREE',${limitValue},2,50,0,0,'REGISTRATION',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP,CURRENT_TIMESTAMP)`;
       return userId;
     };
-    return { examId, categoryId, premiumCategoryId, userId: await user(userTelegramId), otherId: await user(otherTelegramId) };
+    return { examId, categoryId, premiumCategoryId, inactiveCategoryId, userId: await user(userTelegramId), otherId: await user(otherTelegramId) };
   });
   const version = async (questionId: string, number: number, options: { categoryId?: string; free?: boolean; premium?: boolean; text?: string; examId?: string } = {}) =>
     await database.transaction(async (client) => {
@@ -114,15 +116,51 @@ Deno.test("PostgreSQL: actual selection SQL excludes unpublished, wrong exam, in
     for (const status of ["DRAFT", "REVIEWED", "ARCHIVED"]) await f.question({ status });
     const premium = await f.question({ free: false, premium: true, categoryId: f.premiumCategoryId });
     const eligible = await f.question();
+    const service = f.services[0];
+    const listed = await f.database.transaction(async (client) => {
+      const unit = new PracticeUnitOfWork(client);
+      const student = (await unit.student(f.userTelegramId))!;
+      return await unit.categories(student, 0);
+    });
+    assert.deepEqual(listed.map((category) => category.id), [f.categoryId, f.premiumCategoryId]);
+    assert.equal(listed.find((category) => category.id === f.categoryId)?.canAccess, true);
+    assert.equal(listed.find((category) => category.id === f.premiumCategoryId)?.canAccess, false);
+    assert.equal(listed.find((category) => category.id === f.premiumCategoryId)?.requiresUpgrade, true);
+    await assert.rejects(service.next(f.userTelegramId, update(), { categoryId: f.premiumCategoryId }),
+      (error) => error instanceof PracticeError && error.key === "category.upgrade");
+    assert.equal(await f.count("practice_deliveries"), 0);
     const select = () => f.database.transaction(async (client) => {
       const unit = new PracticeUnitOfWork(client);
       const student = (await unit.student(f.userTelegramId))!;
       return await unit.selectVersion(student, null, false);
     });
     assert.equal(await select(), eligible.versionId);
+    const otherExamCategory = await f.database.transaction(async (client) => {
+      const queryId = idQuery(client);
+      const code = `edge-${crypto.randomUUID().slice(0, 8)}`;
+      const examId = await queryId`INSERT INTO exam_types(code,name,name_am,active,display_order,created_at,updated_at)
+        VALUES(${code},'Synthetic Edge Test Exam','',TRUE,0,CURRENT_TIMESTAMP,CURRENT_TIMESTAMP) RETURNING id`;
+      return await queryId`INSERT INTO categories(exam_type_id,code,name,name_am,active,display_order,created_at,updated_at)
+        VALUES(${examId},'other','Synthetic Other Exam Category','',TRUE,0,CURRENT_TIMESTAMP,CURRENT_TIMESTAMP) RETURNING id`;
+    });
+    const categoriesAfterOtherExam = await f.database.transaction(async (client) => {
+      const unit = new PracticeUnitOfWork(client);
+      const student = (await unit.student(f.userTelegramId))!;
+      return await unit.categories(student, 0);
+    });
+    assert.ok(!categoriesAfterOtherExam.some((category) => category.id === otherExamCategory));
     await f.database.transaction(async (c) => { await c.queryArray`UPDATE categories SET active=FALSE WHERE id=${f.categoryId}`; });
     assert.equal(await select(), null);
     await f.database.transaction(async (c) => { await c.queryArray`UPDATE access_entitlements SET access_level='LIFETIME' WHERE user_id=${f.userId}`; });
+    const upgradedCategories = await f.database.transaction(async (client) => {
+      const unit = new PracticeUnitOfWork(client);
+      const student = (await unit.student(f.userTelegramId))!;
+      return await unit.categories(student, 0);
+    });
+    assert.equal(upgradedCategories.find((category) => category.id === f.premiumCategoryId)?.canAccess, true);
+    assert.equal(upgradedCategories.find((category) => category.id === f.premiumCategoryId)?.requiresUpgrade, false);
+    const premiumDelivery = await service.next(f.userTelegramId, update(), { categoryId: f.premiumCategoryId });
+    assert.equal(premiumDelivery.question.versionId, premium.versionId);
     assert.equal(await select(), premium.versionId);
     await f.database.transaction(async (c) => { await c.queryArray`UPDATE exam_types SET active=FALSE WHERE id=${f.examId}`; });
     assert.equal(await select(), null);

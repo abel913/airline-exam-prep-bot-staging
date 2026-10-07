@@ -85,25 +85,57 @@ export class PracticeUnitOfWork {
     };
   }
 
-  async categories(student: PracticeStudent, page: number): Promise<Array<{ id: string; name: string; nameAm: string }>> {
-    const rows = await this.client.queryObject<{ id: string | bigint; name: string; name_am: string }>`
-      SELECT DISTINCT c.id, c.name, c.name_am
-      FROM questions q JOIN question_versions v ON v.id = q.current_version_id
-      JOIN exam_types e ON e.id = v.exam_type_id
-      JOIN categories c ON c.id = v.category_id AND c.exam_type_id = e.id
-      WHERE q.status = 'PUBLISHED' AND e.active = TRUE AND c.active = TRUE AND e.id = ${student.examId}
-        AND (v.free_pool = TRUE OR (${student.accessLevel === "LIFETIME"} = TRUE AND v.premium_pool = TRUE))
+  async categories(student: PracticeStudent, page: number): Promise<Array<{
+    id: string; name: string; nameAm: string; canAccess: boolean; requiresUpgrade: boolean;
+  }>> {
+    const rows = await this.client.queryObject<{
+      id: string | bigint; name: string; name_am: string | null; free_available: boolean; premium_available: boolean;
+    }>`
+      SELECT c.id, c.name, c.name_am,
+        EXISTS (
+          SELECT 1 FROM questions q JOIN question_versions v ON v.id = q.current_version_id
+          WHERE q.status = 'PUBLISHED' AND v.exam_type_id = e.id AND v.category_id = c.id AND v.free_pool = TRUE
+        ) AS free_available,
+        EXISTS (
+          SELECT 1 FROM questions q JOIN question_versions v ON v.id = q.current_version_id
+          WHERE q.status = 'PUBLISHED' AND v.exam_type_id = e.id AND v.category_id = c.id AND v.premium_pool = TRUE
+        ) AS premium_available
+      FROM categories c JOIN exam_types e ON e.id = c.exam_type_id
+      WHERE e.active = TRUE AND c.active = TRUE AND e.id = ${student.examId}
       ORDER BY c.id LIMIT 21 OFFSET ${page * 20}
     `;
-    return rows.rows.map((row) => ({ id: String(row.id), name: row.name, nameAm: row.name_am ?? "" }));
+    return rows.rows.map((row) => {
+      const canAccess = row.free_available || (student.accessLevel === "LIFETIME" && row.premium_available);
+      return {
+        id: String(row.id), name: row.name, nameAm: row.name_am ?? "", canAccess,
+        requiresUpgrade: student.accessLevel === "FREE" && !row.free_available && row.premium_available,
+      };
+    });
   }
 
   async validateCategory(student: PracticeStudent, categoryId: string | null): Promise<void> {
     if (categoryId === null) return;
-    const result = await this.client.queryObject<{ id: string | bigint }>`
-      SELECT id FROM categories WHERE id = ${categoryId} AND exam_type_id = ${student.examId} AND active = TRUE
+    const result = await this.client.queryObject<{ id: string | bigint; free_available: boolean; premium_available: boolean }>`
+      SELECT c.id,
+        EXISTS (
+          SELECT 1 FROM questions q JOIN question_versions v ON v.id = q.current_version_id
+          WHERE q.status = 'PUBLISHED' AND v.exam_type_id = c.exam_type_id AND v.category_id = c.id AND v.free_pool = TRUE
+        ) AS free_available,
+        EXISTS (
+          SELECT 1 FROM questions q JOIN question_versions v ON v.id = q.current_version_id
+          WHERE q.status = 'PUBLISHED' AND v.exam_type_id = c.exam_type_id AND v.category_id = c.id AND v.premium_pool = TRUE
+        ) AS premium_available
+      FROM categories c JOIN exam_types e ON e.id = c.exam_type_id
+      WHERE c.id = ${categoryId} AND c.exam_type_id = ${student.examId} AND c.active = TRUE AND e.active = TRUE
     `;
     if (!result.rows.length) throw new Error("STUDENT_INVALID");
+    const category = result.rows[0];
+    if (student.accessLevel === "FREE" && !category.free_available && category.premium_available) {
+      throw new Error("CATEGORY_UPGRADE");
+    }
+    if (!category.free_available && !(student.accessLevel === "LIFETIME" && category.premium_available)) {
+      throw new Error("PRACTICE_EMPTY");
+    }
   }
 
   async ownedDelivery(student: PracticeStudent, id: string): Promise<PracticeDelivery | null> {

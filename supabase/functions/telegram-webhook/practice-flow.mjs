@@ -49,7 +49,9 @@ function categoryView(result, page = 0) {
     const name = lang === "am" && category.nameAm ? category.nameAm : category.name;
     const callback = `p:c:${category.id}`;
     if (new TextEncoder().encode(callback).length > 64) continue;
-    rows.push([{ text: name, callback_data: callback }]);
+    const text = category.requiresUpgrade ? `🔑 ${name} — ${message(lang, "practice.upgradeLabel")}`
+      : category.canAccess ? `📚 ${name}` : `🔒 ${name} — ${message(lang, "practice.comingSoon")}`;
+    rows.push([{ text, callback_data: callback }]);
   }
   if (page > 0) rows.push([button(lang, "student.previous", `p:g:${page - 1}`)]);
   if (result.categories.length > 20) rows.push([button(lang, "student.next", `p:g:${page + 1}`)]);
@@ -134,6 +136,7 @@ export function createPracticeFlow(service, telegram) {
 
   async function showError(chatId, language, key) {
     const rows = [];
+    if (key === "category.upgrade") rows.push([button(language, "payment.upgrade", "pay:open")]);
     if (key === "practice.limit" || key === "practice.empty") rows.push([button(language, "practice.review", "p:r:0")]);
     rows.push(...home(language));
     await telegram.sendMessage(chatId, message(language, key), { inline_keyboard: rows });

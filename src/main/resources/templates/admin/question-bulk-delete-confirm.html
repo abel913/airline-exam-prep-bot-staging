@@ -1,16 +1,18 @@
 <!doctype html>
 <html lang="en" xmlns:th="http://www.thymeleaf.org">
-<head th:replace="~{admin/fragments :: head('Delete eligible drafts')}"></head>
+<head th:replace="~{admin/fragments :: head('Delete non-published questions')}"></head>
 <body><header th:replace="~{admin/fragments :: header}"></header><div class="shell"><nav th:replace="~{admin/fragments :: nav}"></nav><main>
-<h1>Delete all eligible drafts?</h1>
+<h1>Delete all non-published questions?</h1>
 <p class="notice error" role="alert" th:if="${error}" th:text="${error}"></p>
-<p th:text="${'Total DRAFT questions: '+plan.drafts()}"></p>
+<p th:text="${'Total non-published questions: '+plan.nonPublished()}"></p>
 <p th:text="${'Eligible for permanent deletion: '+plan.eligible()}"></p>
 <p th:text="${'Protected / skipped: '+plan.protectedCount()}"></p>
-<p class="notice error">Eligible draft questions will be permanently deleted. Published, previously published, used, or protected questions will not be deleted. This action cannot be undone.</p>
-<form method="post" th:action="@{/admin/questions/bulk-delete-drafts}">
-<label><input type="checkbox" name="confirm" value="true" required> I understand and confirm deletion of all currently eligible draft questions.</label>
-<button class="danger" th:disabled="${plan.eligible() == 0}">Delete Eligible Drafts</button>
+<p class="notice error">Eligible non-published questions will be permanently deleted. Questions currently PUBLISHED or previously published, used in practice/mock history, or protected by import history will remain untouched. Published questions will NOT be deleted. This action cannot be undone.</p>
+<div th:if="${plan.eligible() == 0}" class="notice">No eligible non-published questions were found. No questions will be deleted.</div>
+<form method="post" th:action="@{/admin/questions/bulk-delete-non-published}" th:if="${plan.eligible() > 0}">
+<label>Type <strong th:text="${'DELETE '+plan.eligible()+' NON-PUBLISHED QUESTIONS'}"></strong> to confirm
+<input name="confirmation" type="text" autocomplete="off" required></label>
+<button class="danger">Delete Non-Published Questions</button>
 </form>
 <p><a th:href="@{/admin/questions}">Return to Questions</a></p>
 </main></div></body></html>

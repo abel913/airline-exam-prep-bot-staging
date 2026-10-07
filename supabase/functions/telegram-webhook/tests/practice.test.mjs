@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { PracticeError, PracticeService } from "../practice-service.mjs";
 import { createPracticeFlow } from "../practice-flow.mjs";
 
-const question = (id, versionId = `v${id}`, { pool = "free", status = "PUBLISHED", examId = "exam-a", categoryId = "cat-a" } = {}) => ({
+const question = (id, versionId = `v${id}`, { pool = "free", status = "PUBLISHED", examId = "exam-a", categoryId = "11" } = {}) => ({
   id, versionId, examId, categoryId, categoryName: categoryId,
   text: `Synthetic question ${id}`, explanation: `Synthetic explanation ${id}`,
   pool, status, options: [
@@ -19,6 +19,11 @@ function fixture({ accessLevel = "FREE", practiceLimit = 2, practiceUsed = 0, qu
   const used = new Set();
   const receipts = new Map();
   const frozenVersions = new Map(questions.map((item) => [item.versionId, structuredClone(item)]));
+  const categoryDefinitions = [
+    { id: "11", name: "Synthetic Free", nameAm: "", freeAvailable: true, premiumAvailable: false },
+    { id: "12", name: "Synthetic Premium", nameAm: "", freeAvailable: false, premiumAvailable: true },
+    { id: "13", name: "Synthetic Empty", nameAm: "", freeAvailable: false, premiumAvailable: false },
+  ];
   let id = 0;
   const mutex = { tail: Promise.resolve() };
   const store = {
@@ -32,8 +37,18 @@ function fixture({ accessLevel = "FREE", practiceLimit = 2, practiceUsed = 0, qu
   };
   const unit = {
     async student(telegramId) { return telegramId === "77" ? student : null; },
-    async categories(_student, page) { return [{ id: "cat-a", name: "Synthetic", nameAm: "" }].slice(page * 20, page * 20 + 21); },
-    async validateCategory(_student, categoryId) { if (categoryId && categoryId !== "cat-a") throw new Error("STUDENT_INVALID"); },
+    async categories(currentStudent, page) { return categoryDefinitions.map((category) => ({
+      id: category.id, name: category.name, nameAm: category.nameAm,
+      canAccess: category.freeAvailable || (currentStudent.accessLevel === "LIFETIME" && category.premiumAvailable),
+      requiresUpgrade: currentStudent.accessLevel === "FREE" && !category.freeAvailable && category.premiumAvailable,
+    })).slice(page * 20, page * 20 + 21); },
+    async validateCategory(currentStudent, categoryId) {
+      if (!categoryId) return;
+      const category = categoryDefinitions.find((item) => item.id === categoryId);
+      if (!category) throw new Error("STUDENT_INVALID");
+      if (currentStudent.accessLevel === "FREE" && !category.freeAvailable && category.premiumAvailable) throw new Error("CATEGORY_UPGRADE");
+      if (!category.freeAvailable && !(currentStudent.accessLevel === "LIFETIME" && category.premiumAvailable)) throw new Error("PRACTICE_EMPTY");
+    },
     async deliveryByUpdateId(updateId) { return deliveries.get(receipts.get(updateId)) ?? null; },
     async recordDeliveryUpdate(_student, updateId, delivery) { assert.equal(receipts.has(updateId), false); receipts.set(updateId, delivery.id); },
     async ownedDelivery(_student, deliveryId) { return deliveries.get(String(deliveryId)) ?? null; },
@@ -42,7 +57,7 @@ function fixture({ accessLevel = "FREE", practiceLimit = 2, practiceUsed = 0, qu
     async selectVersion(_student, categoryId, review) {
       const candidates = questions.filter((q) => q.status === "PUBLISHED" && q.examId === "exam-a"
         && (!categoryId || q.categoryId === categoryId)
-        && (q.pool === "free" || (accessLevel === "LIFETIME" && q.pool === "premium"))
+        && (q.pool === "free" || (student.accessLevel === "LIFETIME" && q.pool === "premium"))
         && used.has(q.id) === review);
       return candidates[0]?.versionId ?? null;
     },
@@ -169,6 +184,34 @@ test("progress math and Telegram callbacks preserve bounded routing", async () =
   await flow.callback("77", "77", "p:menu", "100");
   assert.equal(sent.length, 1);
   assert.equal(sent[0][2].inline_keyboard[0][0].callback_data, "p:c:0");
+});
+
+test("category discovery shows premium categories locked to Free and dynamically unlocks for Lifetime", async () => {
+  const premium = question("premium", "vp", { pool: "premium", categoryId: "12" });
+  const f = fixture({ questions: [question("free"), premium] });
+  const sent = [];
+  const flow = createPracticeFlow(f.service, { async sendMessage(...args) { sent.push(args); } });
+
+  await flow.callback("77", "77", "p:menu", "100");
+  const freeMenu = sent.at(-1)[2].inline_keyboard.flat();
+  assert.ok(freeMenu.some((button) => button.text.includes("Synthetic Free") && button.callback_data === "p:c:11"));
+  assert.ok(freeMenu.some((button) => button.text.includes("🔑 Synthetic Premium — Upgrade") && button.callback_data === "p:c:12"));
+  assert.ok(freeMenu.some((button) => button.text.includes("🔒 Synthetic Empty — Coming soon")));
+  assert.ok(!freeMenu.some((button) => button.text.includes("cat-other")));
+
+  // A forged/direct callback follows the same server-side authorization path.
+  await flow.callback("77", "77", "p:c:12", "101");
+  assert.match(sent.at(-1)[1], /includes Premium practice questions/);
+  assert.equal(sent.at(-1)[2].inline_keyboard[0][0].callback_data, "pay:open");
+  assert.equal(f.deliveries.size, 0);
+
+  f.student.accessLevel = "LIFETIME";
+  await flow.callback("77", "77", "p:menu", "102");
+  const lifetimeMenu = sent.at(-1)[2].inline_keyboard.flat();
+  assert.ok(lifetimeMenu.some((button) => button.text === "📚 Synthetic Premium"));
+  assert.ok(!lifetimeMenu.some((button) => button.text.includes("Synthetic Premium") && button.text.includes("Upgrade")));
+  await flow.callback("77", "77", "p:c:12", "103");
+  assert.match(sent.at(-1)[1], /Synthetic question premium/);
 });
 
 test("practice resume returns the existing exam-scoped delivery without charging or creating a new one", async () => {

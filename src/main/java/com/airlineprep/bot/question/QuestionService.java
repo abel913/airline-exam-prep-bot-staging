@@ -11,6 +11,8 @@ import org.springframework.data.domain.*;
 import org.springframework.data.jpa.domain.Specification;
 import org.springframework.web.server.ResponseStatusException;
 import org.springframework.http.HttpStatus;
+import jakarta.persistence.EntityManager;
+import jakarta.persistence.PersistenceContext;
 @Service @Transactional
 public class QuestionService {
  private final QuestionRepository questions;
@@ -21,6 +23,7 @@ public class QuestionService {
  private final ExamTypeRepository exams;
  private final CategoryRepository categories;
  private final org.springframework.jdbc.core.JdbcTemplate jdbc;
+ @PersistenceContext private EntityManager entityManager;
  public QuestionService(QuestionRepository q,QuestionVersionRepository v,QuestionValidationService validation,
    SettingsService s,AdminChangeService a,ExamTypeRepository e,CategoryRepository c,org.springframework.jdbc.core.JdbcTemplate jdbc) {
   questions=q; versions=v; this.validation=validation; settings=s; changes=a; exams=e; categories=c;this.jdbc=jdbc;
@@ -101,20 +104,29 @@ public class QuestionService {
  public record HardDeleteAssessment(long id,QuestionStatus status,long revision,String preview,boolean eligible,String reason) {}
  @Transactional(readOnly=true)
  public List<HardDeleteAssessment> assessHardDelete(List<Long> ids) {
+  return assessHardDelete(ids,false);
+ }
+ @Transactional(readOnly=true)
+ public List<HardDeleteAssessment> assessNonPublishedHardDelete(List<Long> ids) {
+  return assessHardDelete(ids,true);
+ }
+ private List<HardDeleteAssessment> assessHardDelete(List<Long> ids,boolean allowAllNonPublished) {
   if(ids==null||ids.isEmpty()) return List.of();
   String marks=String.join(",",java.util.Collections.nCopies(ids.size(),"?"));
   String sql="SELECT q.id,q.status,q.revision,COALESCE(v.question_text,'') AS preview,"
    +"EXISTS(SELECT 1 FROM question_versions pv WHERE pv.question_id=q.id AND pv.published_at IS NOT NULL) AS previously_published,"
    +"EXISTS(SELECT 1 FROM practice_deliveries pd WHERE pd.question_id=q.id) AS practice_used,"
+   +"EXISTS(SELECT 1 FROM practice_usage pu WHERE pu.question_id=q.id) AS practice_usage,"
    +"EXISTS(SELECT 1 FROM mock_items mi WHERE mi.question_id=q.id) AS mock_used,"
    +"EXISTS(SELECT 1 FROM question_import_rows ir WHERE ir.question_id=q.id) AS import_linked "
    +"FROM questions q LEFT JOIN question_versions v ON v.id=q.current_version_id WHERE q.id IN ("+marks+") ORDER BY q.id";
   return jdbc.query(sql,(rs,n)->{
    long id=rs.getLong("id");QuestionStatus status=QuestionStatus.valueOf(rs.getString("status"));
-   boolean published=rs.getBoolean("previously_published"),practice=rs.getBoolean("practice_used"),mock=rs.getBoolean("mock_used"),imported=rs.getBoolean("import_linked");
+   boolean published=rs.getBoolean("previously_published"),practice=rs.getBoolean("practice_used")||rs.getBoolean("practice_usage"),mock=rs.getBoolean("mock_used"),imported=rs.getBoolean("import_linked");
    String reason=null;
    if(published) reason="Previously published. Archive it instead.";
-   else if(status!=QuestionStatus.DRAFT) reason="Question is currently "+status+" and cannot be deleted.";
+   else if(status==QuestionStatus.PUBLISHED) reason="Published questions are protected.";
+   else if(!allowAllNonPublished&&status!=QuestionStatus.DRAFT) reason="Question is currently "+status+" and cannot be deleted.";
    else if(practice) reason="Referenced by practice history.";
    else if(mock) reason="Linked to mock history.";
    else if(imported) reason="Protected by import/history relationship.";
@@ -127,6 +139,13 @@ public class QuestionService {
   HardDeleteAssessment assessment=assessHardDelete(List.of(id)).getFirst();
   if(!assessment.eligible()) throw new IllegalArgumentException(assessment.reason());
   hardDelete(q,actor,"safe unpublished question removed");
+ }
+ @Transactional
+ public void deleteSafeNonPublished(long id,Long expected,String actor) {
+  settings.lock();Question q=questions.findById(id).orElseThrow(()->new ResponseStatusException(HttpStatus.NOT_FOUND));stale(q,expected);
+  HardDeleteAssessment assessment=assessNonPublishedHardDelete(List.of(id)).getFirst();
+  if(!assessment.eligible()) throw new IllegalArgumentException(assessment.reason());
+  hardDelete(q,actor,"safe non-published question removed");
  }
  @Transactional
  public boolean hardDeleteUnusedImportQuestion(long id,long batchId,String actor) {
@@ -175,7 +194,8 @@ public class QuestionService {
   q.currentVersion=null;questions.saveAndFlush(q);
   jdbc.update("DELETE FROM question_options WHERE version_id IN (SELECT id FROM question_versions WHERE question_id=?)",id);
   jdbc.update("DELETE FROM question_versions WHERE question_id=?",id);
-  questions.delete(q);questions.flush();
+  if(questions.deleteNonPublishedById(id)!=1) throw new IllegalArgumentException("Published questions are protected.");
+  entityManager.detach(q);
  }
  private void stale(Question q,Long expected) {
   if(expected==null || expected!=q.revision) throw new IllegalArgumentException("This question changed. Reload before saving.");
