@@ -25,12 +25,13 @@ public class MockAttemptService {
   public boolean active() { return status.equals("READY")||status.equals("IN_PROGRESS"); }
  }
  public record Item(int sequence,long versionId,Integer selected,int revision) {}
- public record Intro(Student student,Attempt active,Integer duration) {}
+ public record Intro(Student student,Attempt active,Integer duration,int questionsPerMock) {}
  public record View(Student student,Attempt attempt,Item item,StudentQuestion question,MockScoringService.Score score,boolean review,Long secondsRemaining) {}
  public Intro introduction(long sender) {
   Student s=access.lock(sender);Attempt a=active(s);
   if(a!=null) { a=expire(a);if(!a.active()) a=null; }
-  return new Intro(s,a,settings.current().getMockDurationMinutes());
+  var currentSettings=settings.current();
+  return new Intro(s,a,currentSettings.getMockDurationMinutes(),currentSettings.getQuestionsPerMock());
  }
  public View prepare(long sender,String creationKey) {
   Student s=access.lock(sender);
@@ -43,7 +44,9 @@ public class MockAttemptService {
    return display(s,current,null,false);
   }
   if(!s.lifetime()&&s.mockRemaining()==0) throw new ExamException("mock.limit");
-  int count=s.grant().getQuestionsPerMock();
+  // Admin-configured mock size applies to every user's next mock. Existing attempts
+  // retain their frozen question_count and mock_items.
+  int count=settings.current().getQuestionsPerMock();
   var selected=selector.mock(s,count);
   if(selected.size()!=count) throw new ExamException("mock.empty");
   long id=store.insert("mock_attempts",values("user_id",s.id(),"active_user_id",s.id(),"exam_type_id",s.examId(),

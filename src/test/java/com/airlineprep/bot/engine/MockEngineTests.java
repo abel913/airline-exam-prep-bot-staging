@@ -52,7 +52,9 @@ class MockEngineTests extends EngineFixture {
   assertThat(grant().getMocksUsed()).isEqualTo(1);assertThat(grant().getPracticeUsed()).isZero();
  }
  @Test void fiftyQuestionDefaultScoringCategoriesReviewAndSnapshots() {
-  grant().setQuestionsPerMock(50);
+  var current=com.airlineprep.bot.settings.SettingsForm.from(settings.current());
+  settings.update(new com.airlineprep.bot.settings.SettingsForm(current.freePracticeLimit(),current.freeMockLimit(),50,current.lifetimePrice(),
+   current.currency(),current.paymentEnabled(),current.manualPaymentEnabled(),current.supportInfo(),current.mockDurationMinutes()),"test-admin");
   long second=catalog.save(true,null,new com.airlineprep.bot.admin.CatalogForm("logic","Fictional logic","",true,0,exam),"test-admin");
   content(25);category=second;for(int i=25;i<50;i++) question("Fictional "+i,true,false,true);
   var a=start("fifty");long id=a.attempt().id();
@@ -137,13 +139,26 @@ class MockEngineTests extends EngineFixture {
   assertThatThrownBy(()->mocks.submit(sender,id)).hasMessage("student.invalid");
   assertThatThrownBy(()->mocks.open(sender,id,0,true)).hasMessage("student.invalid");
  }
- @Test void durationValidationAndExistingSizeSnapshotSurviveGlobalChanges() {
+ @Test void durationValidationAndAdminMockSizeApplyToExistingUsersFutureMocks() {
   assertThatThrownBy(()->duration(0)).isInstanceOf(jakarta.validation.ConstraintViolationException.class);
   assertThatThrownBy(()->duration(1441)).isInstanceOf(jakarta.validation.ConstraintViolationException.class);
   var f=com.airlineprep.bot.settings.SettingsForm.from(settings.current());
   settings.update(new com.airlineprep.bot.settings.SettingsForm(f.freePracticeLimit(),f.freeMockLimit(),50,f.lifetimePrice(),
    f.currency(),f.paymentEnabled(),f.manualPaymentEnabled(),f.supportInfo(),null),"test-admin");
-  content(2);assertThat(mocks.prepare(sender,"snapshot").attempt().count()).isEqualTo(2);
+  content(50);
+  assertThat(mocks.introduction(sender).questionsPerMock()).isEqualTo(50);
+  var prepared=mocks.prepare(sender,"admin-updated-size");
+  assertThat(prepared.attempt().count()).isEqualTo(50);
+  var updated=com.airlineprep.bot.settings.SettingsForm.from(settings.current());
+  settings.update(new com.airlineprep.bot.settings.SettingsForm(updated.freePracticeLimit(),updated.freeMockLimit(),25,
+   updated.lifetimePrice(),updated.currency(),updated.paymentEnabled(),updated.manualPaymentEnabled(),updated.supportInfo(),updated.mockDurationMinutes()),"test-admin");
+  assertThat(mocks.introduction(sender).questionsPerMock()).isEqualTo(25);
+  assertThat(mocks.introduction(sender).active().count()).isEqualTo(50);
+  mocks.open(sender,prepared.attempt().id(),0,false);
+  mocks.answer(sender,prepared.attempt().id(),0,0,0);
+  mocks.submit(sender,prepared.attempt().id());
+  assertThat(mocks.prepare(sender,"admin-updated-size-again").attempt().count()).isEqualTo(25);
+  // The registration snapshot remains historical; the global setting controls future attempts.
   assertThat(grant().getQuestionsPerMock()).isEqualTo(2);
  }
 }

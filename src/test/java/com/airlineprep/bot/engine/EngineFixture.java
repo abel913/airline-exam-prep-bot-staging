@@ -17,6 +17,9 @@ public abstract class EngineFixture extends com.airlineprep.bot.IsolatedDatabase
  @Autowired protected jakarta.persistence.EntityManager entityManager;
  protected long sender,exam,category;
  protected void prepareFixture(int mockSize) {
+  var current=SettingsForm.from(settings.current());
+  settings.update(new SettingsForm(current.freePracticeLimit(),current.freeMockLimit(),mockSize,current.lifetimePrice(),
+   current.currency(),current.paymentEnabled(),current.manualPaymentEnabled(),current.supportInfo(),current.mockDurationMinutes()),"test-admin");
   long number=IDS.incrementAndGet();sender=number;
   exam=catalog.save(false,null,new CatalogForm("engine-"+number,"Fictional engine exam","",true,0,null),"test-admin");
   category=catalog.save(true,null,new CatalogForm("numbers","Fictional numbers","",true,0,exam),"test-admin");

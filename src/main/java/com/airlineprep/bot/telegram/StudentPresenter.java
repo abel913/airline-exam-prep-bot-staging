@@ -112,7 +112,7 @@ public class StudentPresenter {
   }
   if(!s.lifetime()&&s.mockRemaining()==0) { error(chat,lang,"mock.limit");return; }
   String timer=intro.duration()==null?message(lang,"mock.untimed"):message(lang,"mock.minutes",intro.duration());
-  send(chat,message(lang,"mock.intro",s.grant().getQuestionsPerMock(),timer,allowance(s,true)),
+  send(chat,message(lang,"mock.intro",intro.questionsPerMock(),timer,allowance(s,true)),
    List.of(List.of(button(lang,"mock.prepare","m:s:"+UUID.randomUUID().toString().replace("-",""))),home(lang).getFirst()));
  }
  public void mock(long chat,MockAttemptService.View v) throws InterruptedException {
