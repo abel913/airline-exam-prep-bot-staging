@@ -8,6 +8,7 @@ import org.junit.jupiter.api.*;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.context.MessageSource;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.transaction.annotation.Transactional;
 import static org.assertj.core.api.Assertions.*;
 import static org.mockito.Mockito.*;
@@ -18,6 +19,7 @@ class StudentTelegramEngineTests extends EngineFixture {
  @Autowired MockAttemptService mocks;
  @Autowired StudentProgressService progress;
  @Autowired MessageSource messages;
+ @Autowired JdbcTemplate jdbc;
  TelegramBotClient client;TelegramUpdateHandler handler;
  List<String> texts;List<String> callbacks;
  ObjectMapper mapper=new ObjectMapper();
@@ -65,6 +67,56 @@ class StudentTelegramEngineTests extends EngineFixture {
  @Test void malformedForgedAndUnsupportedCallbacksDoNotConsume() throws Exception {
   for(String data:List.of("p:a:999999:0","m:o:999999:0","p:c:999999999999999999999999","m:a:bad:0:0:0","s:unknown","p:a:<bad>")) click(data);
   assertThat(grant().getPracticeUsed()).isZero();assertThat(grant().getMocksUsed()).isZero();
+ }
+ @Test void lifetimePremiumMockCanBePreparedThroughTelegramCallback() throws Exception {
+  grant().setAccessLevel("LIFETIME");grant().setMockLimit(0);
+  // Keep this callback-path test's pool Premium-only; setup() normally seeds free mock questions.
+  jdbc.update("UPDATE question_versions SET mock_pool=false WHERE exam_type_id=?",exam);
+  question("Synthetic premium mock question",false,true,true);
+  question("Synthetic premium mock question",false,true,true);
+
+  click("m:intro");
+  assertThat(text()).contains("Unlimited");
+  click(button("m:s:"));
+  assertThat(text()).contains("2 questions are frozen and ready");
+  assertThat(grant().getMocksUsed()).isZero();
+  var callbackOrder=inOrder(client);
+  callbackOrder.verify(client).answerCallbackQuery(anyString());
+  callbackOrder.verify(client).sendMessage(anyLong(),anyString(),anyMap());
+  callbackOrder.verify(client).answerCallbackQuery(anyString());
+  callbackOrder.verify(client).sendMessage(anyLong(),anyString(),anyMap());
+
+  click(button("m:o:"));
+  assertThat(text()).contains("Synthetic premium mock question");
+ }
+ @Test void insufficientLifetimeMockPoolReturnsAnErrorThroughTelegramCallback() throws Exception {
+  grant().setAccessLevel("LIFETIME");grant().setMockLimit(0);
+  var current=com.airlineprep.bot.settings.SettingsForm.from(settings.current());
+  settings.update(new com.airlineprep.bot.settings.SettingsForm(current.freePracticeLimit(),current.freeMockLimit(),4,
+   current.lifetimePrice(),current.currency(),current.paymentEnabled(),current.manualPaymentEnabled(),current.supportInfo(),
+   current.mockDurationMinutes()),"test-admin");
+
+  click("m:intro");
+  click(button("m:s:"));
+  assertThat(text()).contains("Not enough eligible mock questions are currently available");
+  assertThat(grant().getMocksUsed()).isZero();
+  assertThat(mocks.introduction(sender).active()).isNull();
+  var callbackOrder=inOrder(client);
+  callbackOrder.verify(client).answerCallbackQuery(anyString());
+  callbackOrder.verify(client).sendMessage(anyLong(),anyString(),anyMap());
+  callbackOrder.verify(client).answerCallbackQuery(anyString());
+  callbackOrder.verify(client).sendMessage(anyLong(),anyString(),anyMap());
+ }
+ @Test void callbackAcknowledgementFailureDoesNotBlockHandlerAndSendFailureIsNotSwallowed() throws Exception {
+  doThrow(mock(TelegramBotClient.ApiException.class)).when(client).answerCallbackQuery(anyString());
+
+  click("m:intro");
+  assertThat(text()).contains("Mock exam:");
+  verify(client).sendMessage(anyLong(),anyString(),anyMap());
+
+  doThrow(mock(TelegramBotClient.ApiException.class)).when(client).sendMessage(anyLong(),anyString(),anyMap());
+  String prepare=button("m:s:");
+  assertThatThrownBy(()->click(prepare)).isInstanceOf(TelegramBotClient.ApiException.class);
  }
  @Test void groupAndMismatchedSenderNeverReachEngine() throws Exception {
   for(String type:List.of("group","supergroup","channel"))

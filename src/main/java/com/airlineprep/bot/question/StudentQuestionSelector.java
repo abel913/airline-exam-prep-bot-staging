@@ -37,8 +37,8 @@ public class StudentQuestionSelector {
  // Randomization is encapsulated in this selector; selection stays bounded in the database.
  public record FrozenSelection(long questionId,long versionId) {}
  public List<FrozenSelection> mock(Student s,int count) {
-  return jdbc.query("SELECT q.id,v.id "+ELIGIBLE+" AND v.mock_pool=true ORDER BY RANDOM() LIMIT ?",
-   (r,n)->new FrozenSelection(r.getLong(1),r.getLong(2)),s.examId(),count);
+  return jdbc.query("SELECT q.id,v.id "+ELIGIBLE+" AND v.mock_pool=true AND (v.free_pool=true OR (?=true AND v.premium_pool=true)) ORDER BY RANDOM() LIMIT ?",
+   (r,n)->new FrozenSelection(r.getLong(1),r.getLong(2)),s.examId(),s.lifetime(),count);
  }
  public StudentQuestion frozen(long version) {
   var rows=jdbc.query("SELECT * FROM question_versions WHERE id=?",(r,n)->new StudentQuestion(

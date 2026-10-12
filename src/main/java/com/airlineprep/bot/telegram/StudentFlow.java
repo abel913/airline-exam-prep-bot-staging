@@ -2,7 +2,10 @@ package com.airlineprep.bot.telegram;
 import com.airlineprep.bot.practice.*;
 import com.airlineprep.bot.mock.*;
 import com.airlineprep.bot.common.ExamException;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 public class StudentFlow {
+ private static final Logger log=LoggerFactory.getLogger(StudentFlow.class);
  private final PracticeService practice;private final MockAttemptService mocks;
  private final StudentProgressService progress;private final StudentPresenter presenter;
  private final com.airlineprep.bot.settings.SettingsService settings;
@@ -66,7 +69,10 @@ public class StudentFlow {
      }
     }
    }
-  } catch(ExamException e) { presenter.error(sender,lang,e.key()); }
+  } catch(ExamException e) {
+   if(data!=null&&data.startsWith("m:")) log.warn("Mock callback rejected (reason={})",e.key());
+   presenter.error(sender,lang,e.key());
+  }
   catch(NumberFormatException e) { presenter.error(sender,lang,"student.invalid"); }
  }
 }

@@ -39,10 +39,24 @@ public class TelegramUpdateHandler {
         JsonNode callback = update.path("callback_query");
         JsonNode message = callback.isObject() ? callback.path("message") : update.path("message");
         JsonNode sender = callback.isObject() ? callback.path("from") : message.path("from");
+        String callbackData = callback.isObject() ? callback.path("data").asText("") : "";
+        boolean mockCallback = callbackData.startsWith("m:");
         if (callback.isObject() && callback.path("id").isTextual()) {
-            try { client.answerCallbackQuery(callback.path("id").textValue()); }
+            long started = System.nanoTime();
+            try {
+                client.answerCallbackQuery(callback.path("id").textValue());
+                if (mockCallback) log.info("Telegram mock callback acknowledged (action={}, elapsedMs={})",
+                        mockAction(callbackData), elapsedMillis(started));
+            }
             catch (TelegramBotClient.ApiException exception) {
-                log.warn("Telegram callback acknowledgement failed (code {})", exception.code());
+                if (mockCallback) log.warn("Telegram mock callback acknowledgement failed (action={}, code={}, elapsedMs={})",
+                        mockAction(callbackData), exception.code(), elapsedMillis(started));
+                else log.warn("Telegram callback acknowledgement failed (code {}, elapsedMs={})",
+                        exception.code(), elapsedMillis(started));
+            } catch (InterruptedException exception) {
+                if (mockCallback) log.warn("Telegram mock callback acknowledgement interrupted (action={}, elapsedMs={})",
+                        mockAction(callbackData), elapsedMillis(started));
+                throw exception;
             }
         }
         Long senderId = positiveId(sender.path("id"));
@@ -59,8 +73,26 @@ public class TelegramUpdateHandler {
                 else if (data.matches("exam:[1-9][0-9]{0,17}"))
                     show(chatId, registration.exam(senderId, Long.parseLong(data.substring(5))));
                 else if (data.equals("s:exams")) presenter.show(chatId, registration.switchExams(senderId));
-                else if(data.startsWith("s:")||data.startsWith("p:")||data.startsWith("m:"))
-                    students.callback(senderId,data);
+                else if(data.startsWith("s:")||data.startsWith("p:")||data.startsWith("m:")) {
+                    if (data.startsWith("m:")) {
+                        long started = System.nanoTime();
+                        try {
+                            students.callback(senderId,data);
+                            log.info("Telegram mock callback completed (action={}, elapsedMs={})",
+                                    mockAction(data), elapsedMillis(started));
+                        } catch (RuntimeException exception) {
+                            if (exception instanceof TelegramBotClient.ApiException telegramFailure)
+                                log.warn("Telegram mock callback failed (action={}, failure=telegram_api, code={}, elapsedMs={})",
+                                        mockAction(data), telegramFailure.code(), elapsedMillis(started));
+                            else if (exception instanceof DataAccessException || exception instanceof TransactionException)
+                                log.warn("Telegram mock callback failed (action={}, failure=database, errorType={}, elapsedMs={})",
+                                        mockAction(data), exception.getClass().getSimpleName(), elapsedMillis(started));
+                            else log.warn("Telegram mock callback failed (action={}, failure=application, errorType={}, elapsedMs={})",
+                                    mockAction(data), exception.getClass().getSimpleName(), elapsedMillis(started));
+                            throw exception;
+                        }
+                    } else students.callback(senderId,data);
+                }
                 else if(data.startsWith("pay:")&&payments!=null) payments.callback(senderId,data);
                 return;
             }
@@ -112,5 +144,16 @@ public class TelegramUpdateHandler {
     private Long positiveId(JsonNode node) {
         return node.isIntegralNumber() && node.canConvertToLong() && node.longValue() > 0
                 ? node.longValue() : null;
+    }
+    private String mockAction(String data) {
+        if (data.startsWith("m:s:")) return "prepare";
+        if (data.startsWith("m:o:") || data.startsWith("m:r:")) return "open_or_review";
+        if (data.startsWith("m:a:")) return "answer";
+        if (data.startsWith("m:f:")) return "finish";
+        if (data.equals("m:intro")) return "intro";
+        return "other";
+    }
+    private long elapsedMillis(long started) {
+        return java.util.concurrent.TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - started);
     }
 }

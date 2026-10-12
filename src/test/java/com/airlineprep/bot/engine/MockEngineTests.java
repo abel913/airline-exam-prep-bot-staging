@@ -85,6 +85,19 @@ class MockEngineTests extends EngineFixture {
   for(int i=0;i<3;i++) {var a=start("unlimited"+i);mocks.answer(sender,a.attempt().id(),0,0,0);mocks.submit(sender,a.attempt().id());}
   assertThat(grant().getMocksUsed()).isZero();assertThat(progress.get(sender).completed()).isEqualTo(3);
  }
+ @Test void mockSelectionRestrictsFreeUsersAndAllowsLifetimePremiumPool() {
+  long first=question("Synthetic premium mock one",false,true,true);
+  long second=question("Synthetic premium mock two",false,true,true);
+  assertThatThrownBy(()->mocks.prepare(sender,"free-premium-only"))
+   .hasMessage("mock.empty");
+  assertThat(grant().getMocksUsed()).isZero();
+
+  grant().setAccessLevel("LIFETIME");grant().setMockLimit(0);
+  var ready=mocks.prepare(sender,"lifetime-premium-only");
+  assertThat(ready.attempt().count()).isEqualTo(2);
+  assertThat(jdbc.queryForList("SELECT question_id FROM mock_items WHERE attempt_id=?",Long.class,ready.attempt().id()))
+   .containsExactlyInAnyOrder(first,second);
+ }
  @Test void timerSnapshotsStartAtOpenAndExpireAtExactDeadline() {
   duration(1);content(2);var ready=mocks.prepare(sender,"timed");
   assertThat(ready.attempt().deadline()).isNull();
